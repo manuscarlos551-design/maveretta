@@ -290,7 +290,51 @@ for alert in alerts:
 
 **Build Status**: ✅ **NO BREAKING CHANGES**
 
-**Tests**: ⚠️ **MANUAL TESTS PASSED** (automated tests pending)
+---
+
+## 🎤 Voice Commands via Telegram (`core/notifications/voice_commands.py`)
+
+**Objetivo**: Controlar bot através de comandos em linguagem natural via Telegram
+
+**Funcionalidades**:
+- ✅ Reconhecimento de linguagem natural em português
+- ✅ Comandos de posição (reduzir, fechar)
+- ✅ Consultas (exposição, PnL, posições)
+- ✅ Controles (pausar, retomar)
+- ✅ Integração com Telegram bot
+
+**Comandos Suportados**:
+```
+- "Reduzir posições em 50%"
+- "Fechar todas as posições"
+- "Fechar posição em BTC"
+- "Qual minha exposição a BTC?"
+- "Qual meu lucro?"
+- "Quantas posições abertas?"
+- "Pausar tudo"
+- "Retomar tudo"
+```
+
+**Como Usar**:
+```python
+from core.notifications.voice_commands import voice_command_processor
+from core.notifications.telegram_notifier import telegram_notifier
+
+# Setup no Telegram
+telegram_notifier.setup_voice_commands()
+
+# Processar comando manualmente
+action, params = voice_command_processor.process_command(
+    "Reduzir posições em 50%",
+    user_id="12345"
+)
+response = voice_command_processor.execute_command(action, params)
+```
+
+**Integração**:
+- Compatible com `core/notifications/telegram_notifier.py`
+- Compatible com `core/positions/position_manager.py`
+- Compatible com `core/slots/manager.py`
 
 
 
