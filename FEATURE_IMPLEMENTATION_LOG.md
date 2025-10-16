@@ -117,35 +117,23 @@ recent = whale_monitor.get_recent_alerts(symbol='BTC/USDT', limit=10)
 
 ---
 
-## 🔗 Integrações Necessárias (Próximos Passos)
+## 🔗 Integrações Realizadas ✅
 
-### 1. Integração com Orchestrator
-```python
-# Em core/orchestrator/engine.py - método _make_decision
-from core.market.regime_detector import regime_detector
+### 1. ✅ Integração com Orchestrator
+**Arquivo**: `core/orchestrator/engine.py`
+- Importa `regime_detector` e `whale_monitor`
+- Detecta regime antes de cada decisão
+- Bloqueia trades em alta volatilidade
+- Considera zonas de baleias
 
-# Detectar regime antes de decisão
-regime, confidence = regime_detector.detect_regime(market_data)
+### 2. ✅ Integração com Position Manager
+**Arquivo**: `core/positions/position_manager.py`
+- Executa trade autopsy após fechar trade
+- Coleta contexto de mercado
+- Identifica padrões automaticamente
+- Gera recomendações
 
-# Ajustar estratégia baseado no regime
-if regime == MarketRegime.VOLATILE:
-    # Reduzir tamanho de posição
-    decision.size *= 0.5
-```
-
-### 2. Integração com Position Manager
-```python
-# Em core/positions/position_manager.py - método close_live_trade
-from core.analysis.trade_autopsy import trade_autopsy
-
-# Após fechar trade
-analysis = trade_autopsy.analyze_trade(trade_data, market_context)
-
-# Enviar análise para MongoDB
-event_publisher.save_trade_autopsy(analysis)
-```
-
-### 3. Integração com Market Streams
+### 3. 🚧 Integração com Market Streams (Próximo)
 ```python
 # Em core/market/streams.py - processar orderbook/trades
 from core.market.whale_monitor import whale_monitor

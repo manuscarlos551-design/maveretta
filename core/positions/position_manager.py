@@ -316,6 +316,41 @@ class PositionManager:
                     if self.db_client:
                         self._save_trade_to_db(trade)
                     
+                    # NEW: Perform trade autopsy
+                    try:
+                        from core.analysis.trade_autopsy import trade_autopsy
+                        from core.market.regime_detector import regime_detector
+                        
+                        # Prepare trade data for autopsy
+                        trade_data = {
+                            'trade_id': trade.trade_id,
+                            'symbol': trade.symbol,
+                            'entry_time': trade.entry_time,
+                            'exit_time': trade.exit_time,
+                            'entry_price': trade.entry_price,
+                            'exit_price': trade.exit_price,
+                            'pnl': trade.realized_pnl,
+                            'pnl_pct': (trade.realized_pnl / trade.notional_usdt) * 100 if trade.notional_usdt else 0,
+                            'stop_loss': trade.stop_loss_price,
+                            'take_profit': trade.take_profit_price,
+                            'close_reason': reason
+                        }
+                        
+                        # Get market context
+                        regime_stats = regime_detector.get_regime_stats()
+                        market_context = {
+                            'regime': regime_stats.get('current_regime', 'unknown'),
+                            'regime_confidence': regime_stats.get('current_confidence', 0)
+                        }
+                        
+                        # Analyze trade
+                        analysis = trade_autopsy.analyze_trade(trade_data, market_context)
+                        
+                        logger.info(f"Trade autopsy completed for {trade_id}: {len(analysis.get('patterns', []))} patterns identified")
+                        
+                    except Exception as e:
+                        logger.error(f"Error in trade autopsy: {e}")
+                    
                     logger.info(
                         f"Live trade closed: {trade_id} - {trade.symbol} @ {trade.exit_price} "
                         f"(PnL: ${trade.realized_pnl:.2f}, reason: {reason})"

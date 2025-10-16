@@ -572,6 +572,8 @@ class AgentEngine:
         from core.slots.router import slot_router
         from core.slots.models import TradeDecision, TradeAction, SlotMode
         from core.slots.manager import slot_manager
+        from core.market.regime_detector import regime_detector
+        from core.market.whale_monitor import whale_monitor
         import random
         
         start_time = time.time()
@@ -593,6 +595,32 @@ class AgentEngine:
                     f"(debounce: {config.debounce_sec}s)"
                 )
                 return
+            
+            # NEW: Detect market regime
+            try:
+                from core.data.ohlcv_loader import get_recent_ohlcv
+                df = get_recent_ohlcv(symbol, timeframe='5m', limit=100)
+                
+                if df is not None and len(df) > 50:
+                    regime, regime_confidence = regime_detector.detect_regime(df)
+                    
+                    # Check whale activity
+                    whale_zones = whale_monitor.get_whale_zones(symbol)
+                    
+                    logger.debug(
+                        f"Market context for {symbol}: regime={regime.value} "
+                        f"(conf: {regime_confidence:.2%}), whale_zones={len(whale_zones)}"
+                    )
+                    
+                    # Adjust strategy based on regime
+                    if regime.value == 'volatile' and regime_confidence > 0.8:
+                        logger.warning(f"High volatility detected for {symbol}, reducing exposure")
+                        # Skip decision in extreme volatility
+                        increment_risk_blocked(agent_id, "high_volatility")
+                        return
+                    
+            except Exception as e:
+                logger.error(f"Error in regime detection: {e}")
             
             # Get active slot (simplified for Phase 2)
             active_slots = slot_manager.get_active_slots()

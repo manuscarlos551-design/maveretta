@@ -1,6 +1,6 @@
-﻿from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -25,7 +25,8 @@ from interfaces.api.routes import (
     rates_router,
     strategies_router,
     cascade_router,
-    ia as ia_router
+    ia as ia_router,
+    market_analysis # Added for market analysis routes
 )
 
 from interfaces.api.routes.operations import router as operations_router
@@ -80,7 +81,7 @@ class MetricsMiddleware:
 
         method = scope['method']
         path = scope['path']
-        
+
         # Ignora endpoints de mÃ©tricas e health para evitar loop
         if path in ['/metrics', '/v1/metrics', '/v1/health']:
             await self.app(scope, receive, send)
@@ -92,15 +93,15 @@ class MetricsMiddleware:
         async def send_wrapper(message):
             if message['type'] == 'http.response.start':
                 status_code = message['status']
-                
+
                 # Registra mÃ©tricas apÃ³s a resposta
                 request_duration = time.time() - start_time
                 REQUEST_DURATION.labels(method=method, endpoint=path).observe(request_duration)
                 REQUEST_COUNT.labels(method=method, endpoint=path, status_code=status_code).inc()
                 ACTIVE_REQUESTS.dec()
-                
+
                 logger.info(f"ðŸ“Š {method} {path} - {status_code} - {request_duration:.3f}s")
-            
+
             await send(message)
 
         try:
@@ -116,16 +117,16 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("ðŸš€ Iniciando Maveretta AI Gateway...")
     HEALTH_STATUS.set(1)
-    
+
     # Log de informaÃ§Ãµes do sistema
     import os
     logger.info(f"ðŸ“Š Environment: {os.getenv('ENV', 'development')}")
     logger.info(f"ðŸ”§ Debug Mode: {os.getenv('API_DEBUG', 'false')}")
     logger.info(f"ðŸŒ Host: {os.getenv('API_HOST', '0.0.0.0')}")
     logger.info(f"ðŸ”Œ Port: {os.getenv('API_PORT', '8080')}")
-    
+
     yield
-    
+
     # Shutdown
     logger.info("ðŸ›‘ Encerrando Maveretta AI Gateway...")
     HEALTH_STATUS.set(0)
@@ -176,6 +177,7 @@ app.include_router(rates_router)
 app.include_router(strategies_router)
 app.include_router(cascade_router)
 app.include_router(ia_router)
+app.include_router(market_analysis_router) # Included market analysis router
 
 
 # ===== ENDPOINTS DE SISTEMA =====
@@ -214,7 +216,7 @@ async def v1_root():
 metrics_app = make_asgi_app()
 app.mount("/metrics", metrics_app)
 
-# TambÃ©m expÃµe em /v1/metrics para consistÃªncia
+# TambÃ©m expÃµe em /v1/metrics para consistÃ­ncia
 @app.get("/v1/metrics", include_in_schema=False)
 async def metrics_endpoint():
     """Endpoint de mÃ©tricas compatÃ­vel com Prometheus"""
@@ -251,13 +253,14 @@ async def http_exception_handler(request, exc):
 # ===== INICIALIZAÃ‡ÃƒO =====
 if __name__ == "__main__":
     import uvicorn
-    
+    import os
+
     host = os.getenv("API_HOST", "0.0.0.0")
     port = int(os.getenv("API_PORT", "8080"))
     debug = os.getenv("API_DEBUG", "false").lower() == "true"
-    
+
     logger.info(f"ðŸŽ¯ Iniciando servidor em {host}:{port} (debug: {debug})")
-    
+
     uvicorn.run(
         "interfaces.api.main:app",
         host=host,
@@ -265,5 +268,3 @@ if __name__ == "__main__":
         reload=debug,
         log_level="info" if debug else "warning"
     )
-
-
