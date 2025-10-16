@@ -1,0 +1,84 @@
+# Exemplo de configuração YAML para Bot AI Multi-Agente
+# Este arquivo é opcional - o sistema usa .env por padrão
+
+# Configurações principais do engine
+engine:
+  name: "Bot AI Multi-Agent v2"
+  version: "2.0.0-modular"
+
+# Servidor de health check
+health_server:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8000
+
+# Configurações de trading
+trading:
+  symbol: "BTC/USDT"
+  timeframe: "1m"
+  take_profit: 0.10
+  stop_loss: 0.03
+  trail_trigger: 0.06
+  trail_distance: 0.05
+  paper_mode: false
+
+# Configurações de exchange
+exchange:
+  name: "binance"
+  timeout: 20000
+  rate_limit: true
+
+# Gestão de risco
+risk:
+  max_drawdown_pct: 8.0
+  drawdown_reset_hours: 48
+  symbol_block_duration_hours: 2
+  session_max_daily_loss_pct: 3.0
+  session_max_trades_per_hour: 8
+  session_max_consecutive_losses: 3
+  atr_periods: 21
+  atr_multiplier: 1.5
+  min_position_size_usdt: 5.0
+  max_position_size_usdt: 2000.0
+
+# Configurações de IA
+ai:
+  gateway_url: "http://ai-gateway:8080"
+  score_threshold: 0.70
+  cache_ttl_seconds: 60
+  multi_agent_enabled: true
+
+# Trading multi-símbolo
+multi_symbol:
+  enabled: true
+  scan_interval_sec: 4
+  candidates_per_scan: 6
+  max_concurrent_positions: 3
+  min_trade_interval_sec: 15
+  max_exposure_pct: 15.0
+  correlation_threshold: 0.8
+
+# Sistema de notificações
+notifications:
+  enabled: true
+  max_retries: 2
+  timeout: 30
+  telegram:
+    enabled: false
+    timeout: 10
+  discord:
+    enabled: false
+    timeout: 10
+
+# Logging
+logging:
+  level: "INFO"
+  max_history: 1000
+  auto_cleanup_days: 30
+
+# Sistema de plugins
+plugins:
+  enabled: true
+  auto_discover: true
+  directories:
+    - "plugins/implementations"

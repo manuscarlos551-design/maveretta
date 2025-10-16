@@ -1,0 +1,152 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Orchestration - Decision Confidence",
+    "tags": [
+      "orchestration",
+      "decisions",
+      "confidence"
+    ],
+    "style": "dark",
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Decision Confidence by Strategy",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "avg by (strategy) (decision_confidence)",
+            "legendFormat": "{{strategy}}",
+            "refId": "A"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Confidence %",
+            "min": 0,
+            "max": 100
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 2,
+        "title": "Decision Confidence by IA",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "avg by (ia_id) (decision_confidence)",
+            "legendFormat": "{{ia_id}}",
+            "refId": "A"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Confidence %",
+            "min": 0,
+            "max": 100
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 0
+        }
+      },
+      {
+        "id": 3,
+        "title": "Confidence Distribution",
+        "type": "histogram",
+        "targets": [
+          {
+            "expr": "decision_confidence",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 24,
+          "x": 0,
+          "y": 8
+        }
+      },
+      {
+        "id": 4,
+        "title": "High Confidence Decisions (>80%)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "count(decision_confidence > 80)",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 16
+        }
+      },
+      {
+        "id": 5,
+        "title": "Low Confidence Decisions (<50%)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "count(decision_confidence < 50)",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 16
+        }
+      },
+      {
+        "id": 6,
+        "title": "Avg Confidence by Slot",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "avg by (slot_id) (decision_confidence)",
+            "format": "table",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 16
+        }
+      }
+    ],
+    "time": {
+      "from": "now-3h",
+      "to": "now"
+    },
+    "refresh": "1m",
+    "annotations": {
+      "list": [
+        {
+          "name": "Low Confidence Alert",
+          "datasource": "prometheus",
+          "expr": "decision_confidence < 30",
+          "textFormat": "Low confidence: {{ia_id}} -> {{slot_id}} ({{confidence}}%)",
+          "titleFormat": "Low Confidence"
+        }
+      ]
+    }
+  },
+  "title": "Orchestration Decision Conf",
+  "uid": "orchestration-decision-conf"
+}

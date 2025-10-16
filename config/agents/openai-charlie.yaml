@@ -1,0 +1,21 @@
+# OpenAI Agent Charlie Configuration
+agent_id: openai-charlie
+provider: openai
+model: gpt-3.5-turbo
+api_key_env: OPENAI_API_KEY
+role: "trader: scalping"
+exchanges:
+  - binance
+symbols:
+  - ETHUSDT
+  - BNBUSDT
+timeframes:
+  - 1m
+  - 3m
+execution_mode: shadow
+risk:
+  max_daily_drawdown_pct: 1.0
+  max_position_notional_usdt: 500
+  max_open_positions: 1
+talks_with:
+  - openai-bravo

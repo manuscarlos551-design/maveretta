@@ -1,0 +1,156 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Orchestration - IA Health",
+    "tags": [
+      "orchestration",
+      "ia",
+      "health"
+    ],
+    "style": "dark",
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "IA Status Overview",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "ia_state",
+            "legendFormat": "{{ia_id}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "options": {
+                  "0": {
+                    "text": "RED"
+                  }
+                },
+                "type": "value"
+              },
+              {
+                "options": {
+                  "1": {
+                    "text": "AMBER"
+                  }
+                },
+                "type": "value"
+              },
+              {
+                "options": {
+                  "2": {
+                    "text": "GREEN"
+                  }
+                },
+                "type": "value"
+              }
+            ],
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "red",
+                  "value": 0
+                },
+                {
+                  "color": "yellow",
+                  "value": 1
+                },
+                {
+                  "color": "green",
+                  "value": 2
+                }
+              ]
+            }
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 2,
+        "title": "IA Latency (ms)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "ia_latency_ms",
+            "legendFormat": "{{ia_id}}",
+            "refId": "A"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Latency (ms)",
+            "min": 0
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 0
+        }
+      },
+      {
+        "id": 3,
+        "title": "IA Uptime %",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "ia_uptime_pct",
+            "legendFormat": "{{ia_id}}",
+            "refId": "A"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Uptime %",
+            "min": 0,
+            "max": 100
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 24,
+          "x": 0,
+          "y": 8
+        }
+      },
+      {
+        "id": 4,
+        "title": "Errors by IA",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "increase(ia_errors_total[5m])",
+            "legendFormat": "{{ia_id}}",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 24,
+          "x": 0,
+          "y": 16
+        }
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "30s"
+  },
+  "title": "Orchestration Ia Health",
+  "uid": "orchestration-ia-health"
+}

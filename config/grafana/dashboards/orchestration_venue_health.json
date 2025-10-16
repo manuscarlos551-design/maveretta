@@ -1,0 +1,187 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Orchestration - Venue Health",
+    "tags": [
+      "orchestration",
+      "venues",
+      "exchanges",
+      "health"
+    ],
+    "style": "dark",
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Exchange Latency",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "exchange_latency_ms",
+            "legendFormat": "{{exchange_id}}",
+            "refId": "A"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Latency (ms)",
+            "min": 0
+          }
+        ],
+        "thresholds": [
+          {
+            "value": 100,
+            "colorMode": "critical",
+            "op": "gt"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 2,
+        "title": "Clock Skew",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "exchange_skew_ms",
+            "legendFormat": "{{exchange_id}}",
+            "refId": "A"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Skew (ms)"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 0
+        }
+      },
+      {
+        "id": 3,
+        "title": "Exchange Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "exchange_state",
+            "legendFormat": "{{exchange_id}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "options": {
+                  "0": {
+                    "text": "DOWN",
+                    "color": "red"
+                  }
+                },
+                "type": "value"
+              },
+              {
+                "options": {
+                  "1": {
+                    "text": "DEGRADED",
+                    "color": "yellow"
+                  }
+                },
+                "type": "value"
+              },
+              {
+                "options": {
+                  "2": {
+                    "text": "UP",
+                    "color": "green"
+                  }
+                },
+                "type": "value"
+              }
+            ]
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 24,
+          "x": 0,
+          "y": 8
+        }
+      },
+      {
+        "id": 4,
+        "title": "Rate Limit Status",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "exchange_rate_limit_remaining",
+            "legendFormat": "{{exchange_id}} remaining",
+            "refId": "A"
+          },
+          {
+            "expr": "exchange_rate_limit_used",
+            "legendFormat": "{{exchange_id}} used",
+            "refId": "B"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 16
+        }
+      },
+      {
+        "id": 5,
+        "title": "Connection Errors",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "increase(exchange_errors_total[5m])",
+            "legendFormat": "{{exchange_id}} - {{error_type}}",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 16
+        }
+      }
+    ],
+    "time": {
+      "from": "now-2h",
+      "to": "now"
+    },
+    "refresh": "30s",
+    "annotations": {
+      "list": [
+        {
+          "name": "Venue Down",
+          "datasource": "prometheus",
+          "expr": "exchange_state == 0",
+          "textFormat": "{{exchange_id}} is DOWN",
+          "titleFormat": "Exchange Down"
+        },
+        {
+          "name": "High Latency",
+          "datasource": "prometheus",
+          "expr": "exchange_latency_ms > 200",
+          "textFormat": "{{exchange_id}} high latency: {{latency}}ms",
+          "titleFormat": "High Latency Alert"
+        }
+      ]
+    }
+  },
+  "title": "Orchestration Venue Health",
+  "uid": "orchestration-venue-health"
+}

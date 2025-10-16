@@ -1,0 +1,137 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Orchestration - Slots Timeline",
+    "tags": [
+      "orchestration",
+      "slots",
+      "timeline"
+    ],
+    "style": "dark",
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Slot States Timeline",
+        "type": "state-timeline",
+        "targets": [
+          {
+            "expr": "slot_state",
+            "legendFormat": "{{slot_id}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "options": {
+                  "0": {
+                    "text": "RED",
+                    "color": "red"
+                  }
+                },
+                "type": "value"
+              },
+              {
+                "options": {
+                  "1": {
+                    "text": "AMBER",
+                    "color": "yellow"
+                  }
+                },
+                "type": "value"
+              },
+              {
+                "options": {
+                  "2": {
+                    "text": "GREEN",
+                    "color": "green"
+                  }
+                },
+                "type": "value"
+              }
+            ]
+          }
+        },
+        "gridPos": {
+          "h": 12,
+          "w": 24,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 2,
+        "title": "Slot State Distribution",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "count by (state) (slot_state)",
+            "legendFormat": "{{state}}",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 12
+        }
+      },
+      {
+        "id": 3,
+        "title": "Active Slots Count",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "count(slot_state > 0)",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 12
+        }
+      },
+      {
+        "id": 4,
+        "title": "Slot State Changes",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "increase(slot_state_changes_total[5m])",
+            "legendFormat": "{{slot_id}} -> {{new_state}}",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 24,
+          "x": 0,
+          "y": 20
+        }
+      }
+    ],
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    },
+    "refresh": "15s",
+    "annotations": {
+      "list": [
+        {
+          "name": "Slot Override",
+          "datasource": "prometheus",
+          "expr": "slot_override_events",
+          "textFormat": "Manual override: {{slot_id}} -> {{strategy}}",
+          "titleFormat": "Slot Override"
+        }
+      ]
+    }
+  },
+  "title": "Orchestration Slots Timeline",
+  "uid": "orchestration-slots-timeline"
+}

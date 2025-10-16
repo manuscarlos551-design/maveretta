@@ -1,0 +1,21 @@
+# OpenAI Agent Alpha Configuration
+agent_id: openai-alpha
+provider: openai
+model: gpt-4
+api_key_env: OPENAI_API_KEY
+role: "trader: trend-following"
+exchanges:
+  - binance
+symbols:
+  - BTCUSDT
+  - ETHUSDT
+timeframes:
+  - 1m
+  - 5m
+execution_mode: shadow
+risk:
+  max_daily_drawdown_pct: 2.0
+  max_position_notional_usdt: 1000
+  max_open_positions: 2
+talks_with:
+  - openai-bravo

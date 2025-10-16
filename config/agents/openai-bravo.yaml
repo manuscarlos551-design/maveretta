@@ -1,0 +1,22 @@
+# OpenAI Agent Bravo Configuration
+agent_id: openai-bravo
+provider: openai
+model: gpt-4
+api_key_env: OPENAI_API_KEY
+role: "trader: mean-reversion"
+exchanges:
+  - binance
+symbols:
+  - BTCUSDT
+  - SOLUSDT
+timeframes:
+  - 5m
+  - 15m
+execution_mode: shadow
+risk:
+  max_daily_drawdown_pct: 1.5
+  max_position_notional_usdt: 800
+  max_open_positions: 3
+talks_with:
+  - openai-alpha
+  - openai-charlie
