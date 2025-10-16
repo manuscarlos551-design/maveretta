@@ -574,6 +574,9 @@ class AgentEngine:
         from core.slots.manager import slot_manager
         from core.market.regime_detector import regime_detector
         from core.market.whale_monitor import whale_monitor
+        from core.learning.meta_learning import meta_learning
+        from core.risk.flash_crash_recovery import flash_crash_detector
+        from core.testing.realtime_backtest import realtime_backtest
         import random
         
         start_time = time.time()
@@ -607,6 +610,10 @@ class AgentEngine:
                     # Check whale activity
                     whale_zones = whale_monitor.get_whale_zones(symbol)
                     
+                    # Flash crash detection
+                    current_price = df['close'].iloc[-1]
+                    flash_crash_detector.update_price(symbol, current_price, df['volume'].iloc[-1])
+                    
                     logger.debug(
                         f"Market context for {symbol}: regime={regime.value} "
                         f"(conf: {regime_confidence:.2%}), whale_zones={len(whale_zones)}"
@@ -630,11 +637,20 @@ class AgentEngine:
             
             slot_id = random.choice(active_slots)
             
+            # Consulta sabedoria coletiva antes de decidir
+            pattern = f"{regime.value}_{symbol}" if 'regime' in locals() else symbol
+            collective = meta_learning.get_collective_wisdom(pattern)
+            
             # Simulate decision making (Phase 2: simplified, no LLM call yet)
             # In Phase 3, this would call the LLM for actual analysis
             action, confidence, reason = self._simulate_decision(
                 agent_id, symbol, config
             )
+            
+            # Ajusta confiança baseado em meta-learning
+            if collective['sample_size'] > 10:
+                confidence = (confidence + collective['confidence']) / 2
+                reason += f" | Collective wisdom: {collective['consensus']}"
             
             # Check confidence threshold
             if confidence < config.confidence_min:
@@ -660,6 +676,14 @@ class AgentEngine:
                 reason=reason,
                 size=0.01  # Default size for Phase 2
             )
+            
+            # Shadow execute para backtesting em tempo real
+            shadow_id = None
+            if state.mode == 'live':
+                shadow_id = realtime_backtest.shadow_execute(
+                    decision.to_dict(),
+                    df['close'].iloc[-1] if 'df' in locals() else 0
+                )
             
             # Execute decision through slot router
             success, message, details = slot_router.execute_decision(decision)
@@ -691,6 +715,20 @@ class AgentEngine:
                 "details": details
             })
             event_publisher.save_decision(decision_data)
+            
+            # Compartilha experiência com outros agentes (meta-learning)
+            if success and details:
+                meta_learning.share_experience(
+                    agent_id=agent_id,
+                    pattern=pattern if 'pattern' in locals() else symbol,
+                    success=success,
+                    context={
+                        'regime': regime.value if 'regime' in locals() else 'unknown',
+                        'action': action.value,
+                        'mode': state.mode
+                    },
+                    pnl=details.get('pnl', 0)
+                )
             
             # Update debounce tracking
             last_decision_times[last_decision_key] = current_time
