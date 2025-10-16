@@ -26,6 +26,9 @@ class TelegramNotifier:
         self.timeout = int(os.getenv('TELEGRAM_TIMEOUT', '10'))
 
         self.base_url = f"https://api.telegram.org/bot{self.bot_token}"
+        
+        # Voice command processor
+        self.voice_processor = None
 
         if self.enabled and self.bot_token and self.chat_id:
             logger.info(f"✅ Telegram Notifier habilitado (Chat ID: {self.chat_id})")
@@ -150,6 +153,71 @@ class TelegramNotifier:
             f"⏰ {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC"
         )
         await self.send_message(message)
+    
+    def setup_voice_commands(self):
+        """
+        Setup voice command processing
+        Integra com o VoiceCommandProcessor
+        """
+        try:
+            from core.notifications.voice_commands import voice_command_processor
+            self.voice_processor = voice_command_processor
+            logger.info("✅ Voice Commands integrados ao Telegram")
+        except Exception as e:
+            logger.error(f"❌ Erro ao integrar Voice Commands: {e}")
+    
+    async def process_voice_command(self, text: str, user_id: str) -> str:
+        """
+        Processa comando de voz/texto
+        
+        Args:
+            text: Texto do comando
+            user_id: ID do usuário
+        
+        Returns:
+            Resposta do comando
+        """
+        if not self.voice_processor:
+            self.setup_voice_commands()
+        
+        if not self.voice_processor:
+            return "❌ Voice Commands não disponível"
+        
+        try:
+            # Processar comando
+            action, params = self.voice_processor.process_command(text, user_id)
+            
+            # Executar comando
+            response = self.voice_processor.execute_command(action, params)
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Erro ao processar voice command: {e}")
+            return f"❌ Erro ao processar comando: {str(e)}"
+    
+    async def handle_telegram_update(self, update: Dict[str, Any]):
+        """
+        Handle incoming Telegram updates (messages)
+        
+        Args:
+            update: Telegram update object
+        """
+        try:
+            if 'message' in update and 'text' in update['message']:
+                text = update['message']['text']
+                user_id = str(update['message']['from']['id'])
+                chat_id = update['message']['chat']['id']
+                
+                # Verificar se é comando de voz (não começa com /)
+                if not text.startswith('/'):
+                    response = await self.process_voice_command(text, user_id)
+                    
+                    # Enviar resposta
+                    await self.send_message(response)
+                    
+        except Exception as e:
+            logger.error(f"Erro ao processar update do Telegram: {e}")
 
 
 # Instância global

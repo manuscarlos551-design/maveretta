@@ -276,13 +276,50 @@ for alert in alerts:
 
 ---
 
+---
+
+## 📱 PWA Mobile Dashboard (`interfaces/web/pwa/`)
+
+**Objetivo**: Dashboard mobile-first otimizado para controle via smartphone
+
+**Funcionalidades**:
+- ✅ PWA com suporte offline
+- ✅ Push notifications
+- ✅ Ações rápidas (Emergency Stop, Ver Posições)
+- ✅ Métricas principais em cards
+- ✅ Interface touch-friendly
+- ✅ Instalável como app nativo
+
+**Arquivos**:
+- `manifest.json` - PWA manifest
+- `service-worker.js` - Service worker para cache offline
+- `mobile_dashboard.py` - Dashboard Streamlit mobile-optimized
+
+**Como Usar**:
+```bash
+# Servir PWA
+streamlit run interfaces/web/pwa/mobile_dashboard.py --server.port 5001
+
+# Acessar via mobile e "Adicionar à tela inicial"
+```
+
+**Features**:
+- 📊 Métricas principais (PnL, Posições, Win Rate)
+- 🛑 Botão de emergência
+- 📈 Lista de posições abertas
+- ❌ Fechar posições individuais
+- 🔔 Notificações push
+- 💾 Funciona offline
+
+---
+
 ## 📈 Roadmap Próximas Features
 
-1. **Smart Order Routing (SOR)** - Agregação cross-exchange
-2. **Framework de A/B Testing** - Testar estratégias em paralelo
-3. **Arbitragem Cross-Chain** - Scanner DEX/CEX
+1. ✅ **Voice Commands** - Comandos por voz via Telegram
+2. ✅ **PWA Mobile Dashboard** - App mobile nativo
+3. **Cross-Chain Arbitrage** - Scanner DEX/CEX
 4. **Chat AI Assistant** - Interface conversacional
-5. **PWA Mobile Dashboard** - App mobile nativo
+5. **Yield Farming Optimizer** - Auto-compound DeFi
 
 ---
 
@@ -332,11 +369,18 @@ response = voice_command_processor.execute_command(action, params)
 ```
 
 **Integração**:
-- Compatible com `core/notifications/telegram_notifier.py`
-- Compatible com `core/positions/position_manager.py`
-- Compatible com `core/slots/manager.py`
+- ✅ Integrado com `core/notifications/telegram_notifier.py`
+- ✅ Compatible com `core/positions/position_manager.py`
+- ✅ Compatible com `core/slots/manager.py`
 
+**Como Ativar**:
+```python
+# No telegram_notifier
+telegram_notifier.setup_voice_commands()
 
+# Processa automaticamente mensagens não-comando
+# Basta enviar texto normal como "Fechar todas as posições"
+```
 
 ---
 
