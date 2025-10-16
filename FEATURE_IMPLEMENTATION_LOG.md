@@ -291,3 +291,242 @@ for alert in alerts:
 **Build Status**: ✅ **NO BREAKING CHANGES**
 
 **Tests**: ⚠️ **MANUAL TESTS PASSED** (automated tests pending)
+
+
+
+---
+
+## 🚀 Novas Funcionalidades Implementadas (Continuação)
+
+### 4. 🎯 Consenso Multi-Timeframe (`core/consensus/multi_timeframe.py`)
+
+**Objetivo**: Agentes votam em sinais através de diferentes timeframes para maior confiança
+
+**Funcionalidades**:
+- ✅ Agregação de sinais de 6 timeframes (1m, 5m, 15m, 1h, 4h, 1d)
+- ✅ Pesos configuráveis por timeframe
+- ✅ Cálculo de alinhamento entre timeframes
+- ✅ Dimensionamento dinâmico de posição baseado em consenso
+- ✅ Histórico de consensos
+
+**Como Usar**:
+```python
+from core.consensus.multi_timeframe import multi_timeframe_consensus
+from core.consensus.multi_timeframe import TimeframeSignal
+
+# Criar sinais
+signals = [
+    TimeframeSignal('1m', 'buy', 0.8, 'agent_1', {}, datetime.now()),
+    TimeframeSignal('5m', 'buy', 0.9, 'agent_2', {}, datetime.now()),
+    TimeframeSignal('1h', 'sell', 0.6, 'agent_3', {}, datetime.now())
+]
+
+# Agregar consenso
+action, confidence, details = multi_timeframe_consensus.aggregate_signals(
+    signals, 'BTC/USDT'
+)
+
+# Ajustar tamanho de posição
+size = multi_timeframe_consensus.get_dynamic_position_size(
+    base_size=100,
+    alignment_score=details['alignment_score'],
+    confidence=confidence
+)
+```
+
+---
+
+### 5. 🧪 Framework de A/B Testing (`core/testing/ab_testing.py`)
+
+**Objetivo**: Testar múltiplas versões de estratégia em paralelo com significância estatística
+
+**Funcionalidades**:
+- ✅ Criação de testes com múltiplas variantes
+- ✅ Alocação de tráfego por variante
+- ✅ Testes estatísticos (t-test) vs controle
+- ✅ Cálculo de lift e significância
+- ✅ Recomendações automáticas (promote/reject/continue)
+- ✅ Determinação de vencedor baseado em dados
+
+**Como Usar**:
+```python
+from core.testing.ab_testing import ab_testing_framework, StrategyVariant
+
+# Criar variantes
+control = StrategyVariant(
+    variant_id='control',
+    name='Strategy V1',
+    strategy_params={'stop_loss': 0.02},
+    allocation_pct=50,
+    is_control=True
+)
+
+challenger = StrategyVariant(
+    variant_id='challenger',
+    name='Strategy V2',
+    strategy_params={'stop_loss': 0.015},
+    allocation_pct=50
+)
+
+# Criar teste
+test_id = ab_testing_framework.create_test(
+    test_name='Stop Loss Optimization',
+    variants=[control, challenger],
+    duration_hours=48,
+    min_samples=50
+)
+
+# Atribuir variante para trade
+variant = ab_testing_framework.assign_variant(test_id, 'BTC/USDT')
+
+# Registrar resultado
+ab_testing_framework.record_result(
+    test_id=test_id,
+    variant_id=variant.variant_id,
+    symbol='BTC/USDT',
+    pnl=150.0
+)
+
+# Analisar resultados
+analysis = ab_testing_framework.analyze_test(test_id)
+print(f"Winner: {analysis['winner']}")
+print(f"Statistical significance: {analysis['statistical_tests']}")
+```
+
+---
+
+### 6. 🔀 Smart Order Routing (`core/execution/smart_order_router.py`)
+
+**Objetivo**: Agregação de liquidez cross-exchange para melhor execução
+
+**Funcionalidades**:
+- ✅ Busca quotes de múltiplas exchanges simultaneamente
+- ✅ Ordenação por melhor preço (incluindo fees)
+- ✅ Divisão inteligente de ordens
+- ✅ Verificação de slippage
+- ✅ Cálculo de preço médio ponderado
+- ✅ Estatísticas de roteamento
+
+**Como Usar**:
+```python
+from core.execution.smart_order_router import smart_order_router
+
+# Buscar melhor execução
+orders, avg_price, total_fee = await smart_order_router.get_best_execution(
+    symbol='BTC/USDT',
+    side='buy',
+    amount=1.5,
+    max_slippage_pct=0.5
+)
+
+# Executar ordens
+for order in orders:
+    print(f"Execute {order['amount']} on {order['exchange']} @ {order['price']}")
+
+# Estatísticas
+stats = smart_order_router.get_routing_statistics()
+print(f"Avg slippage: {stats['avg_slippage_pct']:.2%}")
+```
+
+---
+
+## 📊 Integrações Necessárias
+
+### 1. Integrar Multi-Timeframe no Orchestrator
+```python
+# Em core/orchestrator/engine.py - método run_consensus_round
+from core.consensus.multi_timeframe import multi_timeframe_consensus, TimeframeSignal
+
+# Coletar sinais de diferentes timeframes
+signals = []
+for agent_id in participating_agents:
+    for tf in ['5m', '15m', '1h']:
+        signal = TimeframeSignal(
+            timeframe=tf,
+            action=agent_decision,
+            confidence=agent_confidence,
+            agent_id=agent_id,
+            indicators={},
+            timestamp=datetime.now()
+        )
+        signals.append(signal)
+
+# Agregar consenso multi-timeframe
+action, confidence, details = multi_timeframe_consensus.aggregate_signals(
+    signals, symbol
+)
+```
+
+### 2. Integrar A/B Testing no Slot Manager
+```python
+# Em core/slots/manager.py
+from core.testing.ab_testing import ab_testing_framework
+
+# Ao criar slot
+test_id = '...'  # ID do teste ativo
+variant = ab_testing_framework.assign_variant(test_id, slot.symbol)
+
+# Aplicar parâmetros da variante
+slot.strategy_params.update(variant.strategy_params)
+
+# Após fechar trade
+ab_testing_framework.record_result(
+    test_id=test_id,
+    variant_id=variant.variant_id,
+    symbol=slot.symbol,
+    pnl=trade.pnl
+)
+```
+
+### 3. Integrar SOR no Order Executor
+```python
+# Em core/execution/order_executor.py
+from core.execution.smart_order_router import smart_order_router
+
+# Antes de executar ordem grande
+if amount > threshold:
+    orders, avg_price, total_fee = await smart_order_router.get_best_execution(
+        symbol=symbol,
+        side=side,
+        amount=amount
+    )
+    
+    # Executar ordens distribuídas
+    for order in orders:
+        execute_on_exchange(order)
+else:
+    # Execução normal
+    execute_single_order(symbol, side, amount)
+```
+
+---
+
+## 🎨 Grafana Dashboards (A Criar)
+
+### Multi-Timeframe Dashboard
+- Panel: Alignment score por símbolo (gauge)
+- Panel: Consenso por timeframe (heatmap)
+- Panel: Dynamic position sizing (graph)
+
+### A/B Testing Dashboard
+- Panel: Teste ativo (stat)
+- Panel: Performance por variante (bar chart)
+- Panel: P-value e significância (table)
+- Panel: Lift % (gauge)
+
+### Smart Order Routing Dashboard
+- Panel: Ordens por exchange (pie chart)
+- Panel: Avg slippage (gauge)
+- Panel: Total fees saved (stat)
+- Panel: Routing timeline (graph)
+
+---
+
+## ✅ Próximos Passos
+
+1. **Voice Commands** - Interface de voz via Telegram
+2. **PWA Mobile** - Dashboard mobile-first
+3. **Cross-Chain Arbitrage** - Scanner DEX/CEX
+4. **Chat AI Assistant** - Assistente conversacional
+5. **Yield Farming Optimizer** - Auto-compound DeFi
+
