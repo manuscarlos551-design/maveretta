@@ -1,0 +1,90 @@
+{
+  "grafana": {
+    "base_url": "http://grafana:3000",
+    "datasource_uid": "maveretta-overview-live",
+    "dashboards": {
+      "overview": {
+        "uid": "maveretta-overview-live",
+        "name": "Maveretta Bot Overview",
+        "description": "Dashboard principal com equity e métricas gerais"
+      },
+      "market_overview": {
+        "uid": "maveretta-market-overview", 
+        "name": "Market Overview",
+        "description": "Gráfico de mercado BTC/USDT com EMAs"
+      },
+      "top10": {
+        "uid": "maveretta-top10-live",
+        "name": "Top 10 Crypto Prices", 
+        "description": "Top 10 preços de criptomoedas em tempo real"
+      },
+      "dynamic": {
+        "uid": "maveretta-dynamic-live",
+        "name": "Dynamic Symbol Analysis",
+        "description": "Análise dinâmica por símbolo selecionado"
+      },
+      "slots": {
+        "uid": "maveretta-slots-live",
+        "name": "Trading Slots Monitor",
+        "description": "Monitoramento de slots de trading"
+      },
+      "orchestration": {
+        "uid": "orchestration-venue-health",
+        "name": "Orchestration Venue Health", 
+        "description": "Saúde das exchanges e venues"
+      }
+    },
+    "panels": {
+      "market_chart": {
+        "dashboard": "market_overview",
+        "panel_id": 1,
+        "description": "Gráfico principal BTC/USDT"
+      },
+      "top10_chart": {
+        "dashboard": "top10",
+        "panel_id": 1,
+        "description": "TimeSeries top 10 preços"
+      },
+      "dynamic_chart": {
+        "dashboard": "dynamic", 
+        "panel_id": 1,
+        "description": "Análise em tempo real do símbolo selecionado"
+      },
+      "slots_overview": {
+        "dashboard": "slots",
+        "panel_id": 1,
+        "description": "KPIs dos slots ativos"
+      }
+    }
+  },
+  "metrics": {
+    "binance": {
+      "equity_brl": "sum without() (binance_equity_brl)",
+      "equity_usdt": "sum without() (binance_equity_usdt)", 
+      "top10_prices": "topk(10, binance_best_ask{symbol=~\".*USDT\"})",
+      "connection_status": "binance_connection_status",
+      "latency": "binance_latency_seconds"
+    },
+    "bot": {
+      "slots_active": "sum without() (bot_slots_active)",
+      "cycles_completed": "sum without() (increase(bot_cycles_completed_total[1h]))",
+      "websocket_rate": "rate(binance_websocket_messages_total[1m]) * 60"
+    },
+    "recording_rules": {
+      "equity_brl": "maveretta:equity_brl",
+      "equity_usdt": "maveretta:equity_usdt", 
+      "ws_msgs_per_min": "maveretta:ws_msgs_per_min",
+      "best_ask_top10_usdt": "maveretta:best_ask_top10_usdt"
+    }
+  },
+  "api_endpoints": {
+    "base_url": "/v1",
+    "health": "/health",
+    "ias": "/ias/health",
+    "exchanges": "/exchanges/health",
+    "orchestration": "/orchestration/state", 
+    "slots": "/slots",
+    "wallet": "/wallet",
+    "logs": "/logs"
+  }
+}

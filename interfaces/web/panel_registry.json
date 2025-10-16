@@ -1,0 +1,49 @@
+{
+  "overview": {
+    "consensus_approval": {"uid": "agent-drilldown-phase3", "slug": "agent-drilldown-phase-3", "panel_id": 3, "height": 200},
+    "risk_blocked": {"uid": "agent-drilldown-phase3", "slug": "agent-drilldown-phase-3", "panel_id": 5, "height": 300},
+    "consensus_by_symbol": {"uid": "agents-overview-phase3", "slug": "agents-overview-phase-3", "panel_id": 3, "height": 300},
+    "open_positions": {"uid": "agents-overview-phase3", "slug": "agents-overview-phase-3", "panel_id": 6, "height": 200},
+    "consensus_rounds": {"uid": "maveretta-consensus-flow", "slug": "maveretta-consensus-flow", "panel_id": 1, "height": 300},
+    "consensus_approved": {"uid": "maveretta-consensus-flow", "slug": "maveretta-consensus-flow", "panel_id": 2, "height": 300},
+    "approval_rate": {"uid": "maveretta-consensus-flow", "slug": "maveretta-consensus-flow", "panel_id": 3, "height": 200},
+    "risk_by_reason": {"uid": "maveretta-consensus-flow", "slug": "maveretta-consensus-flow", "panel_id": 7, "height": 300},
+    "services_status": {"uid": "maveretta-infrastructure", "slug": "maveretta-infrastructure-system", "panel_id": 4, "height": 200},
+    "price_chart": {"uid": "maveretta-overview-live", "slug": "maveretta-overview-live", "panel_id": 7, "height": 300},
+    "top10_prices": {"uid": "maveretta-top10-live", "slug": "maveretta-top-10-prices", "panel_id": 1, "height": 300}
+  },
+  "operations": {
+    "paper_pnl": {"uid": "agents-overview-phase3", "slug": "agents-overview-phase-3", "panel_id": 5, "height": 300},
+    "cpu_usage": {"uid": "maveretta-infrastructure", "slug": "maveretta-infrastructure-system", "panel_id": 1, "height": 300},
+    "memory_usage": {"uid": "maveretta-infrastructure", "slug": "maveretta-infrastructure-system", "panel_id": 2, "height": 300},
+    "disk_usage": {"uid": "maveretta-infrastructure", "slug": "maveretta-infrastructure-system", "panel_id": 3, "height": 300},
+    "latency": {"uid": "maveretta-overview-live", "slug": "maveretta-overview-live", "panel_id": 18, "height": 300},
+    "exchange_latency": {"uid": "orchestration-venue-health", "slug": "orchestration-venue-health", "panel_id": 1, "height": 300}
+  },
+  "slots": {
+    "active_slots": {"uid": "maveretta-slots-live", "slug": "maveretta-trading-slots", "panel_id": 1, "height": 300},
+    "cycles_completed": {"uid": "maveretta-slots-live", "slug": "maveretta-trading-slots", "panel_id": 2, "height": 300},
+    "capital_total": {"uid": "maveretta-slots-live", "slug": "maveretta-trading-slots", "panel_id": 3, "height": 200},
+    "slots_timeline": {"uid": "orchestration-slots-timeline", "slug": "orchestration-slots-timeline", "panel_id": 1, "height": 300},
+    "state_distribution": {"uid": "orchestration-slots-timeline", "slug": "orchestration-slots-timeline", "panel_id": 2, "height": 300}
+  },
+  "ia_insights": {
+    "confidence_heatmap": {"uid": "agent-drilldown-phase3", "slug": "agent-drilldown-phase-3", "panel_id": 2, "height": 350},
+    "agent_status": {"uid": "agents-overview-phase3", "slug": "agents-overview-phase-3", "panel_id": 1, "height": 200},
+    "decisions_per_hour": {"uid": "agents-overview-phase3", "slug": "agents-overview-phase-3", "panel_id": 2, "height": 300},
+    "consensus_confidence": {"uid": "agents-overview-phase3", "slug": "agents-overview-phase-3", "panel_id": 4, "height": 300},
+    "decision_conf_strategy": {"uid": "orchestration-decision-conf", "slug": "orchestration-decision-conf", "panel_id": 1, "height": 200},
+    "ia_latency": {"uid": "orchestration-ia-health", "slug": "orchestration-ia-health", "panel_id": 2, "height": 300}
+  },
+  "orchestration": {
+    "decision_timeline": {"uid": "agent-drilldown-phase3", "slug": "agent-drilldown-phase-3", "panel_id": 1, "height": 300},
+    "decision_latency": {"uid": "agent-drilldown-phase3", "slug": "agent-drilldown-phase-3", "panel_id": 4, "height": 300},
+    "arbitrage_pnl": {"uid": "orchestration-arbitrage-legs", "slug": "orchestration-arbitrage-legs", "panel_id": 3, "height": 300}
+  },
+  "backtests": {
+    "bybit_equity": {"uid": "maveretta-bybit-live", "slug": "maveretta-bybit-live", "panel_id": 1, "height": 200},
+    "coinbase_equity": {"uid": "maveretta-coinbase-live", "slug": "maveretta-coinbase-live", "panel_id": 1, "height": 200},
+    "kucoin_equity": {"uid": "maveretta-kucoin-live", "slug": "maveretta-kucoin-live", "panel_id": 1, "height": 200},
+    "portfolio_usdt": {"uid": "maveretta-overview-live", "slug": "maveretta-overview-live", "panel_id": 13, "height": 300}
+  }
+}

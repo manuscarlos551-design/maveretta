@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maveretta Bot - AI Trading Orchestration</title>
+    <style>
+        /* Enhanced CSS for orchestration dashboard */
+        .main-container {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .dashboard-header {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(12px);
+            border-radius: 16px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .dashboard-title {
+            color: white;
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin: 0 0 0.5rem 0;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .dashboard-subtitle {
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 1.1rem;
+            margin: 0;
+        }
+        
+        /* Semaforo styles */
+        .semaforo {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+            box-shadow: 0 0 8px rgba(0,0,0,0.3);
+        }
+        
+        .semaforo-green {
+            background: linear-gradient(135deg, #10b981, #059669);
+            box-shadow: 0 0 12px rgba(16, 185, 129, 0.5);
+        }
+        
+        .semaforo-amber {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            box-shadow: 0 0 12px rgba(245, 158, 11, 0.5);
+        }
+        
+        .semaforo-red {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            box-shadow: 0 0 12px rgba(239, 68, 68, 0.5);
+        }
+        
+        /* Strategy badge styles */
+        .strategy-badge {
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            color: white;
+            padding: 0.4rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            display: inline-block;
+            margin: 0.2rem;
+            box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+            transition: transform 0.2s ease;
+        }
+        
+        .strategy-badge:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+        }
+        
+        /* IA Card styles */
+        .ia-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin: 0.75rem 0;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(8px);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        
+        .ia-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+        }
+        
+        .ia-card h3 {
+            margin: 0 0 0.5rem 0;
+            color: #1f2937;
+            font-weight: 700;
+        }
+        
+        .ia-card .ia-role {
+            color: #6b7280;
+            font-size: 0.9rem;
+            font-style: italic;
+            margin-bottom: 1rem;
+        }
+        
+        .ia-metrics {
+            display: flex;
+            gap: 1rem;
+            font-size: 0.8rem;
+            color: #374151;
+        }
+        
+        /* Slot row styles */
+        .slot-row {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 8px;
+            padding: 1rem;
+            margin: 0.5rem 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            transition: background-color 0.2s ease;
+        }
+        
+        .slot-row:hover {
+            background: rgba(255, 255, 255, 1);
+        }
+        
+        .slot-id {
+            font-weight: 700;
+            color: #1f2937;
+            min-width: 80px;
+        }
+        
+        .slot-details {
+            flex: 1;
+            margin-left: 1rem;
+        }
+        
+        /* Cross-venue indicator */
+        .cross-venue {
+            background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+            color: white;
+            padding: 0.3rem 0.6rem;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            display: inline-block;
+            margin-left: 0.5rem;
+        }
+        
+        /* Responsive grid */
+        .orchestration-grid {
+            display: grid;
+            grid-template-columns: 3fr 2fr 2fr 3fr;
+            gap: 2rem;
+            margin: 2rem 0;
+        }
+        
+        @media (max-width: 1200px) {
+            .orchestration-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .orchestration-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .grid-column {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(8px);
+            border-radius: 16px;
+            padding: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .grid-column h3 {
+            color: white;
+            margin: 0 0 1rem 0;
+            font-weight: 700;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+        }
+        
+        .grid-column .subtitle {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 0.9rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        /* Animation classes */
+        .fade-in {
+            animation: fadeIn 0.6s ease-in;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+        
+        /* Status indicators */
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin: 0.5rem 0;
+        }
+        
+        .status-text {
+            font-weight: 600;
+        }
+        
+        .status-green .status-text { color: #10b981; }
+        .status-amber .status-text { color: #f59e0b; }
+        .status-red .status-text { color: #ef4444; }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <header class="dashboard-header fade-in">
+            <h1 class="dashboard-title">🤖 Maveretta Bot</h1>
+            <p class="dashboard-subtitle">Sistema de Orquestração de Trading com IA</p>
+        </header>
+        
+        <main id="dashboard-content">
+            <!-- Content will be dynamically inserted by Streamlit -->
+        </main>
+    </div>
+    
+    <script>
+        // Enhanced interactivity for dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            // Add fade-in animation to dynamically loaded content
+            const observer = new MutationObserver(function(mutations) {
+                mutations.forEach(function(mutation) {
+                    if (mutation.addedNodes.length) {
+                        mutation.addedNodes.forEach(function(node) {
+                            if (node.nodeType === 1) { // Element node
+                                node.classList.add('fade-in');
+                            }
+                        });
+                    }
+                });
+            });
+            
+            observer.observe(document.getElementById('dashboard-content'), {
+                childList: true,
+                subtree: true
+            });
+            
+            // Add pulse animation to semaforos
+            setInterval(function() {
+                const semaforos = document.querySelectorAll('.semaforo-red, .semaforo-amber');
+                semaforos.forEach(function(semaforo) {
+                    semaforo.classList.add('pulse');
+                    setTimeout(function() {
+                        semaforo.classList.remove('pulse');
+                    }, 2000);
+                });
+            }, 5000);
+        });
+    </script>
+</body>
+</html>
