@@ -1,0 +1,16 @@
+{
+  "timestamp": "2025-09-29T09:45:33.638436",
+  "status": "active",
+  "services": {
+    "ai_gateway": "running",
+    "dashboard": "running",
+    "bot_runner": "running",
+    "scanner": "running"
+  },
+  "uptime_seconds": 0,
+  "last_trade": null,
+  "active_symbols": [
+    "BTC/USDT",
+    "ETH/USDT"
+  ]
+}

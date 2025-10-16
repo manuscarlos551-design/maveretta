@@ -1,0 +1,22 @@
+{
+  "slots": {
+    "1": {
+      "active": true,
+      "symbol": "BTC/USDT",
+      "strategy": "default"
+    },
+    "2": {
+      "active": true,
+      "symbol": "ETH/USDT",
+      "strategy": "default"
+    },
+    "3": {
+      "active": false,
+      "symbol": "",
+      "strategy": ""
+    }
+  },
+  "max_slots": 3,
+  "auto_assign": true,
+  "last_updated": "2025-09-29T09:45:33.629242"
+}

@@ -1,0 +1,23 @@
+{
+  "timestamp": "2025-09-29T09:45:33.638492",
+  "candidates": [
+    {
+      "symbol": "BTC/USDT",
+      "score": 0.85,
+      "volume_24h": 1000000,
+      "price_change_24h": 2.5,
+      "volatility": 0.03,
+      "trend": "bullish"
+    },
+    {
+      "symbol": "ETH/USDT",
+      "score": 0.78,
+      "volume_24h": 800000,
+      "price_change_24h": 1.8,
+      "volatility": 0.04,
+      "trend": "bullish"
+    }
+  ],
+  "scan_count": 1,
+  "last_scan": "2025-09-29T09:45:33.638492"
+}
