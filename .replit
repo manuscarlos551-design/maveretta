@@ -1,0 +1,7 @@
+modules = ["bash", "web", "python-3.11"]
+[agent]
+expertMode = true
+
+[nix]
+channel = "stable-25_05"
+packages = ["cargo", "glibcLocales", "libiconv", "libuv", "libxcrypt", "libyaml", "ocl-icd", "opencl-headers", "rustc"]
