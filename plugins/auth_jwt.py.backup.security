@@ -1,0 +1,406 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+JWT Auth Plugin - Bot AI Trading
+Sistema de autenticação JWT com hash de senhas
+"""
+
+import os
+import logging
+from typing import Dict, Any, Optional, Union
+from datetime import datetime, timedelta
+import jwt
+from passlib.context import CryptContext
+from fastapi import HTTPException, Depends, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel
+from .base.plugin_interface import IPlugin
+
+logger = logging.getLogger(__name__)
+
+# Models
+class TokenData(BaseModel):
+    """Dados do token JWT"""
+    username: str
+    user_id: str
+    roles: list = []
+    exp: datetime
+
+class UserCredentials(BaseModel):
+    """Credenciais de usuário"""
+    username: str
+    password: str
+
+class TokenResponse(BaseModel):
+    """Resposta de token"""
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user_info: dict
+
+class JWTAuthPlugin(IPlugin):
+    """
+    Plugin de Autenticação JWT
+    """
+    
+    def __init__(self):
+        """Inicializa o plugin de autenticação"""
+        self.name = "JWTAuthPlugin"
+        self.version = "1.0.0"
+        self.description = "Sistema de autenticação JWT com hash de senhas"
+        self.enabled = True
+        self.secret_key = None
+        self.algorithm = "HS256"
+        self.token_expire_minutes = 30
+        # Initialize pwd_context with better error handling
+        try:
+            # Try bcrypt first
+            self.pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+            # Test it with a short password
+            test_hash = self.pwd_context.hash("test")
+            self.pwd_context.verify("test", test_hash)
+            logger.info("✅ BCrypt context initialized successfully")
+        except Exception as e:
+            logger.warning(f"BCrypt context failed, using PBKDF2: {e}")
+            # Fallback to PBKDF2 which is more reliable
+            self.pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+        self.security = HTTPBearer()
+        
+        # Database simulado de usuários (em produção seria BD real)
+        self.users_db = {}
+        
+        logger.info(f"🔐 {self.name} v{self.version} initialized")
+    
+    def get_info(self) -> Dict[str, Any]:
+        """Retorna informações do plugin"""
+        return {
+            "name": self.name,
+            "version": self.version,
+            "description": self.description,
+            "enabled": self.enabled,
+            "type": "authentication",
+            "dependencies": ["pyjwt", "passlib[bcrypt]", "fastapi"],
+            "config": {
+                "algorithm": self.algorithm,
+                "token_expire_minutes": self.token_expire_minutes,
+                "require_auth": True
+            }
+        }
+    
+    def initialize(self, config: Optional[Dict[str, Any]] = None) -> bool:
+        """Inicializa o sistema de autenticação"""
+        
+        try:
+            # Configuração padrão
+            default_config = {
+                "secret_key": os.getenv("API_SECRET_KEY", "botai_secret_key_2025")[:64],  # Limit to 64 chars
+                "algorithm": "HS256",
+                "token_expire_minutes": 30,
+                "require_auth": True
+            }
+            
+            if config:
+                default_config.update(config)
+            
+            self.secret_key = default_config["secret_key"]
+            self.algorithm = default_config["algorithm"]
+            self.token_expire_minutes = default_config["token_expire_minutes"]
+            self.config = default_config
+            
+            # Criar usuários padrão (em produção seria do BD)
+            self._create_default_users()
+            
+            logger.info("✅ JWT authentication system initialized")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error initializing JWT auth: {e}")
+            return False
+    
+    def _create_default_users(self):
+        """Cria usuários padrão para o sistema"""
+        
+        default_users = [
+            {
+                "username": "admin",
+                "password": "admin123",
+                "roles": ["admin", "trader"],
+                "user_id": "1"
+            },
+            {
+                "username": "trader",
+                "password": "trader123", 
+                "roles": ["trader"],
+                "user_id": "2"
+            },
+            {
+                "username": "viewer",
+                "password": "viewer123",
+                "roles": ["viewer"],
+                "user_id": "3"
+            }
+        ]
+        
+        for user in default_users:
+            hashed_password = self.get_password_hash(user["password"])
+            self.users_db[user["username"]] = {
+                "username": user["username"],
+                "hashed_password": hashed_password,
+                "roles": user["roles"],
+                "user_id": user["user_id"],
+                "created_at": datetime.now().isoformat(),
+                "active": True
+            }
+        
+        logger.info(f"👥 Created {len(default_users)} default users")
+    
+    def get_password_hash(self, password: str) -> str:
+        """Gera hash da senha"""
+        # Truncate password to 72 bytes for bcrypt compatibility
+        if len(password.encode('utf-8')) > 72:
+            password = password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
+        return self.pwd_context.hash(password)
+    
+    def verify_password(self, plain_password: str, hashed_password: str) -> bool:
+        """Verifica senha"""
+        return self.pwd_context.verify(plain_password, hashed_password)
+    
+    def authenticate_user(self, username: str, password: str) -> Union[Dict[str, Any], None]:
+        """Autentica usuário"""
+        
+        user = self.users_db.get(username)
+        if not user:
+            return None
+        
+        if not self.verify_password(password, user["hashed_password"]):
+            return None
+        
+        return user
+    
+    def create_access_token(self, data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
+        """Cria token de acesso"""
+        
+        to_encode = data.copy()
+        
+        if expires_delta:
+            expire = datetime.utcnow() + expires_delta
+        else:
+            expire = datetime.utcnow() + timedelta(minutes=self.token_expire_minutes)
+        
+        to_encode.update({"exp": expire})
+        
+        encoded_jwt = jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
+        return encoded_jwt
+    
+    def verify_token(self, token: str) -> Union[TokenData, None]:
+        """Verifica e decodifica token"""
+        
+        try:
+            payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
+            username: str = payload.get("sub")
+            
+            if username is None:
+                return None
+            
+            token_data = TokenData(
+                username=username,
+                user_id=payload.get("user_id", ""),
+                roles=payload.get("roles", []),
+                exp=datetime.fromtimestamp(payload.get("exp"))
+            )
+            
+            return token_data
+            
+        except jwt.ExpiredSignatureError:
+            logger.warning("Token expired")
+            return None
+        except jwt.JWTError as e:
+            logger.warning(f"JWT error: {e}")
+            return None
+    
+    def login(self, credentials: UserCredentials) -> Union[TokenResponse, None]:
+        """Realiza login e retorna token"""
+        
+        try:
+            user = self.authenticate_user(credentials.username, credentials.password)
+            if not user:
+                return None
+            
+            # Criar dados do token
+            token_data = {
+                "sub": user["username"],
+                "user_id": user["user_id"],
+                "roles": user["roles"]
+            }
+            
+            # Criar token
+            access_token_expires = timedelta(minutes=self.token_expire_minutes)
+            access_token = self.create_access_token(
+                data=token_data,
+                expires_delta=access_token_expires
+            )
+            
+            return TokenResponse(
+                access_token=access_token,
+                expires_in=self.token_expire_minutes * 60,
+                user_info={
+                    "username": user["username"],
+                    "user_id": user["user_id"],
+                    "roles": user["roles"]
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"Login error: {e}")
+            return None
+    
+    def get_current_user(self, credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())):
+        """Dependency para obter usuário atual"""
+        
+        try:
+            token_data = self.verify_token(credentials.credentials)
+            
+            if token_data is None:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Could not validate credentials",
+                    headers={"WWW-Authenticate": "Bearer"}
+                )
+            
+            user = self.users_db.get(token_data.username)
+            if user is None:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="User not found"
+                )
+            
+            return user
+            
+        except Exception as e:
+            logger.error(f"Authentication error: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication failed"
+            )
+    
+    def require_roles(self, required_roles: list):
+        """Dependency para verificar roles"""
+        
+        def role_checker(current_user: dict = Depends(self.get_current_user)):
+            user_roles = current_user.get("roles", [])
+            
+            if not any(role in user_roles for role in required_roles):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Insufficient permissions"
+                )
+            
+            return current_user
+        
+        return role_checker
+    
+    def create_user(self, username: str, password: str, roles: list = None, user_id: str = None) -> bool:
+        """Cria novo usuário"""
+        
+        try:
+            if username in self.users_db:
+                logger.warning(f"User {username} already exists")
+                return False
+            
+            if roles is None:
+                roles = ["viewer"]
+            
+            if user_id is None:
+                user_id = str(len(self.users_db) + 1)
+            
+            hashed_password = self.get_password_hash(password)
+            
+            self.users_db[username] = {
+                "username": username,
+                "hashed_password": hashed_password,
+                "roles": roles,
+                "user_id": user_id,
+                "created_at": datetime.now().isoformat(),
+                "active": True
+            }
+            
+            logger.info(f"✅ User {username} created successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error creating user: {e}")
+            return False
+    
+    def execute(self) -> Dict[str, Any]:
+        """Executa verificações do sistema de autenticação"""
+        
+        try:
+            status = {
+                "plugin": self.name,
+                "timestamp": datetime.now().isoformat(),
+                "auth_enabled": self.enabled,
+                "users_count": len(self.users_db),
+                "token_expire_minutes": self.token_expire_minutes,
+                "algorithm": self.algorithm
+            }
+            
+            # Estatísticas de usuários
+            active_users = sum(1 for user in self.users_db.values() if user.get("active", True))
+            roles_summary = {}
+            
+            for user in self.users_db.values():
+                for role in user.get("roles", []):
+                    roles_summary[role] = roles_summary.get(role, 0) + 1
+            
+            status.update({
+                "active_users": active_users,
+                "roles_summary": roles_summary,
+                "security_status": "active"
+            })
+            
+            return status
+            
+        except Exception as e:
+            logger.error(f"Error executing auth checks: {e}")
+            return {
+                "plugin": self.name,
+                "status": "error",
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+    
+    def shutdown(self) -> bool:
+        """Shutdown do plugin"""
+        
+        try:
+            # Limpar dados sensíveis da memória
+            self.users_db.clear()
+            self.secret_key = None
+            
+            logger.info(f"🛑 {self.name} shutdown completed")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
+            return False
+
+# Instância global do plugin
+jwt_auth_plugin = JWTAuthPlugin()
+
+# Utilitários de conveniência
+def setup_jwt_auth(config: Optional[Dict[str, Any]] = None):
+    """Setup rápido de JWT auth"""
+    return jwt_auth_plugin.initialize(config)
+
+def get_current_user():
+    """Dependency para obter usuário atual"""
+    return jwt_auth_plugin.get_current_user
+
+def require_roles(roles: list):
+    """Dependency para verificar roles"""
+    return jwt_auth_plugin.require_roles(roles)
+
+def create_token(username: str, password: str) -> Union[TokenResponse, None]:
+    """Cria token para credenciais"""
+    credentials = UserCredentials(username=username, password=password)
+    return jwt_auth_plugin.login(credentials)
