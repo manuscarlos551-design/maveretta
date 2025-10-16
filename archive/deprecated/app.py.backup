@@ -1,0 +1,3421 @@
+# interfaces/web/app.py
+"""
+Maveretta Bot - Dashboard Principal
+Interface Streamlit unificada consumindo exclusivamente via API Client
+Nunca acessa bancos ou serviços diretamente - apenas via AI Gateway
+
+Versão INTEGRADA - Primeira onda de dados reais conectados
+"""
+import os
+import sys
+import time
+import base64
+import re
+import logging
+import requests
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# -------------------------
+# HELPER FUNCTIONS - CORREÇÃO OBRIGATÓRIA
+# -------------------------
+def fmt_num(value, default="–"):
+    """Formatar números seguros - nunca quebra com None"""
+    if value is None:
+        return default
+    try:
+        return f"{float(value):,.2f}"
+    except (ValueError, TypeError):
+        return default
+
+def fmt_pct(value, default="–"):
+    """Formatar percentuais seguros - nunca quebra com None"""
+    if value is None:
+        return default
+    try:
+        return f"{float(value):.2f}%"
+    except (ValueError, TypeError):
+        return default
+
+# -------------------------
+# CONSTANTES GRAFANA - CORREÇÃO OBRIGATÓRIA
+# -------------------------
+GRAFANA_URL = os.getenv("GRAFANA_URL", "/grafana").rstrip("/") or "/grafana"
+# UIDs vazios por padrão - serão configurados quando dashboards existirem
+DASHBOARD_OVERVIEW_UID = os.getenv("GRAFANA_OVERVIEW_UID", "")
+DASHBOARD_SLOTS_UID = os.getenv("GRAFANA_SLOTS_UID", "") 
+DASHBOARD_ORCHESTRACAO_UID = os.getenv("GRAFANA_ORCHESTRATION_UID", "")
+DASHBOARD_TOP10_UID = os.getenv("GRAFANA_TOP10_UID", "")
+DASHBOARD_DYNAMIC_UID = os.getenv("GRAFANA_DYNAMIC_UID", "")
+DASHBOARD_MARKET_UID = os.getenv("GRAFANA_MARKET_UID", "")
+
+# Caminhos estáticos padronizados
+APP_DIR = Path(__file__).parent
+STATIC_DIR = APP_DIR / "static"
+AVATAR_DIR = STATIC_DIR / "avatars"
+
+def static_exists(name: str) -> bool:
+    return (STATIC_DIR / name).exists()
+
+def avatar_path_for(ia_id: str) -> Path:
+    """Retorna o caminho do avatar padronizado."""
+    return AVATAR_DIR / f"{ia_id}.png"
+
+# -------------------------
+# IMPORTS THIRD-PARTY
+# -------------------------
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+import streamlit.components.v1 as components
+
+# -------------------------
+# CORE IMPORTS (API CLIENT ONLY)
+# -------------------------
+import api_client
+import prometheus_client_helper as prom
+from grafana_embed import render_grafana_panel, render_full_dashboard, get_dashboard_uid
+
+# -------------------------
+# CONFIGURAÇÃO DA PÁGINA
+# -------------------------
+st.set_page_config(
+    page_title="Maveretta Bot - AI Trading Orchestration",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# -------------------------
+# CSS TEMA DARK PREMIUM (VERSÃO RESTAURADA)
+# -------------------------
+THEME_CSS = """
+<style>
+:root {
+  --bg: #0a0d14;
+  --panel: #141922;
+  --panel2: #1c2531;
+  --panel3: #252d3d;
+  --text: #e8eaef;
+  --text-secondary: #b8c2d3;
+  --muted: #8a95a6;
+  --accent: #f5c451;
+  --accent-hover: #f7d373;
+  --green: #22c55e;
+  --red: #ef4444;
+  --blue: #3b82f6;
+  --purple: #8b5cf6;
+  --border: #2a3441;
+  --border-light: #3d4654;
+  --shadow: rgba(0,0,0,0.25);
+}
+
+/* Base styling */
+html, body, .stApp { 
+  background-color: var(--bg); 
+  color: var(--text);
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* Header styling - PREMIUM */
+.main-header {
+  text-align: center;
+  margin: 0 0 1.5rem 0;
+  padding: 1rem 0;
+  background: linear-gradient(135deg, var(--panel2) 0%, var(--panel) 100%);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 20px var(--shadow);
+  position: relative;
+  overflow: hidden;
+}
+
+.main-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--green), var(--blue));
+}
+
+.main-title {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  color: var(--text);
+  margin: 0 0 0.25rem 0;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.main-subtitle {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+/* Advanced tab styling - PREMIUM */
+.stTabs [data-baseweb="tab-list"] {
+  gap: 2px;
+  padding: 6px;
+  background: var(--panel);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  margin-bottom: 2rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) transparent;
+}
+
+.stTabs [data-baseweb="tab"] {
+  height: 48px;
+  min-width: 85px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid transparent;
+  font-weight: 600;
+  font-size: 12px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  white-space: nowrap;
+  position: relative;
+  overflow: hidden;
+}
+
+.stTabs [data-baseweb="tab"]:hover {
+  background: var(--panel2);
+  color: var(--text-secondary);
+  border-color: var(--border-light);
+  transform: translateY(-1px);
+}
+
+.stTabs [aria-selected="true"] {
+  background: linear-gradient(135deg, var(--panel3) 0%, var(--panel2) 100%);
+  color: var(--text);
+  border-color: var(--accent);
+  box-shadow: 0 2px 8px rgba(245, 196, 81, 0.15);
+  position: relative;
+}
+
+.stTabs [aria-selected="true"]::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60%;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+}
+
+/* Cards and metrics - COMPACTOS PREMIUM */
+.metric-card, .metric-card-neutral, .metric-card-success, .metric-card-warning, .metric-card-danger {
+  padding: 0.75rem;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  margin-bottom: 0.75rem;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.metric-card {
+  background: linear-gradient(135deg, var(--panel2) 0%, var(--panel) 100%);
+  box-shadow: 0 4px 12px var(--shadow);
+}
+
+.metric-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px var(--shadow);
+  border-color: var(--border-light);
+}
+
+.metric-card-neutral {
+  background: var(--panel);
+  border-left: 4px solid var(--accent);
+}
+
+.metric-card-success {
+  background: var(--panel);
+  border-left: 4px solid var(--green);
+}
+
+.metric-card-warning {
+  background: var(--panel);
+  border-left: 4px solid var(--accent);
+}
+
+.metric-card-danger {
+  background: var(--panel);
+  border-left: 4px solid var(--red);
+}
+
+.metric-card-unconfigured {
+  background: var(--panel);
+  border-left: 4px solid var(--muted);
+  opacity: 0.7;
+}
+
+/* Section headers - PREMIUM */
+.section-header {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 2rem 0 1rem;
+  padding: 0.75rem 1rem;
+  background: linear-gradient(90deg, var(--panel2) 0%, transparent 100%);
+  border-left: 4px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+  color: var(--text);
+}
+
+/* KPI Cards - PREMIUM */
+.kpi-card {
+  background: var(--panel2);
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  text-align: center;
+  margin: 0.5rem;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+  transition: all 0.3s ease;
+}
+
+.kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 15px rgba(0,0,0,0.2);
+  border-color: var(--border-light);
+}
+
+/* Status colors */
+.status-green { color: var(--green); font-weight: bold; }
+.status-amber { color: var(--accent); font-weight: bold; }
+.status-red { color: var(--red); font-weight: bold; }
+
+/* Grafana embed - PREMIUM */
+.grafana-embed { 
+  border: 1px solid var(--border); 
+  border-radius: 8px; 
+  height: 400px; 
+  background-color: var(--panel2);
+  margin-bottom: 1rem;
+  transition: all 0.3s ease;
+}
+
+.grafana-embed:hover {
+  border-color: var(--border-light);
+  box-shadow: 0 4px 12px var(--shadow);
+}
+
+/* Interactive elements */
+.clickable-item {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.clickable-item:hover {
+  background-color: var(--panel3) !important;
+  transform: translateY(-1px);
+}
+
+/* Responsive design */
+@media (max-width: 899px) {
+  .stTabs [data-baseweb="tab-list"] {
+    overflow-x: scroll;
+    scrollbar-width: thin;
+  }
+  
+  .stTabs [data-baseweb="tab"] {
+    min-width: 95px;
+    font-size: 12px;
+    padding: 10px 12px;
+  }
+  
+  .main-title {
+    font-size: 22px;
+  }
+  
+  .section-header {
+    font-size: 16px;
+  }
+}
+
+/* Button improvements - PREMIUM */
+.stButton > button {
+  background-color: var(--panel2) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  font-weight: 600;
+}
+
+.stButton > button:hover {
+  background-color: var(--panel3) !important;
+  border-color: var(--border-light) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px var(--shadow);
+}
+
+/* Table styling */
+.stDataFrame {
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+</style>
+"""
+
+st.markdown(THEME_CSS, unsafe_allow_html=True)
+
+# -------------------------
+# HELPER FUNCTIONS
+# -------------------------
+def fmt_money(v: Union[str, int, float], sym: str = "") -> str:
+    """Format money values"""
+    try:
+        if v is None:
+            return "–"
+        val = float(v)
+        if abs(val) >= 1e6:
+            return f"{sym}{val/1e6:.1f}M"
+        elif abs(val) >= 1e3:
+            return f"{sym}{val/1e3:.1f}k"
+        else:
+            return f"{sym}{val:.2f}"
+    except (ValueError, TypeError):
+        return str(v) if v is not None else "–"
+
+def format_state(state):
+    """Format state with colored indicator."""
+    if not state:
+        return '<span class="status-red">🔴 OFFLINE</span>'
+    
+    if state == "GREEN":
+        return f'<span class="status-green">🟢 {state}</span>'
+    elif state == "AMBER":
+        return f'<span class="status-amber">🟡 {state}</span>'
+    else:
+        return f'<span class="status-red">🔴 {state}</span>'
+
+def safe_get(data, key, default=None):
+    """Safely get value from dict/list"""
+    if isinstance(data, dict):
+        return data.get(key, default)
+    elif isinstance(data, list) and isinstance(key, int) and 0 <= key < len(data):
+        return data[key]
+    return default
+
+def prom_query(expr: str, timeout: int = 6) -> Dict[str, Any]:
+    """
+    Execute PromQL query and return result
+    Uses PrometheusClient from prometheus_client_helper
+    Returns: {"status": "success|error", "data": {"result": [...]}}
+    """
+    try:
+        client = prom.PrometheusClient()
+        return client.query(expr, timeout=timeout)
+    except Exception as e:
+        logger.error(f"PromQL query failed: {expr} - {e}")
+        return {"status": "error", "data": {"result": []}}
+
+def prom_query_value(expr: str, default=0) -> float:
+    """Execute PromQL query and extract single scalar value"""
+    try:
+        result = prom_query(expr)
+        if result.get("status") == "success":
+            data = result.get("data", {}).get("result", [])
+            if data and len(data) > 0:
+                value = data[0].get("value", [None, "0"])
+                if len(value) > 1:
+                    return float(value[1])
+        return default
+    except Exception as e:
+        logger.error(f"Failed to extract value from PromQL: {expr} - {e}")
+        return default
+
+def prom_query_series(expr: str) -> List[Dict[str, Any]]:
+    """Execute PromQL query and return all result series"""
+    try:
+        result = prom_query(expr)
+        if result.get("status") == "success":
+            return result.get("data", {}).get("result", [])
+        return []
+    except Exception as e:
+        logger.error(f"Failed to get series from PromQL: {expr} - {e}")
+        return []
+
+def _is_odd_slot(slot_id: str) -> bool:
+    """Detecta se slot é ímpar baseado no ID"""
+    try:
+        # Tenta extrair número do slot_id
+        import re
+        numbers = re.findall(r'\d+', str(slot_id))
+        if numbers:
+            return int(numbers[0]) % 2 == 1
+        # Fallback: hash do slot_id
+        return hash(str(slot_id)) % 2 == 1
+    except:
+        return True  # default para ímpar
+
+def get_avatar_path(avatar_number: int) -> str:
+    """Retorna path do avatar com fallback automático"""
+    avatar_path = f"/interfaces/web/static/avatares/avatar{avatar_number}.png"
+    
+    # Verifica se arquivo existe (caminho completo no sistema)
+    full_path = Path(__file__).parent / "static" / "avatares" / f"avatar{avatar_number}.png"
+    
+    if full_path.exists():
+        return avatar_path
+    
+    # Retorna None para usar placeholder
+    return None
+
+def render_avatar_with_fallback(avatar_number: int, size: int = 60) -> str:
+    """Renderiza avatar com fallback automático para placeholder"""
+    avatar_path = get_avatar_path(avatar_number)
+    
+    if avatar_path:
+        return f"""
+        <div style="width: {size}px; height: {size}px; border-radius: 50%; overflow: hidden; border: 2px solid var(--border);">
+            <img src="{avatar_path}" style="width: 100%; height: 100%; object-fit: cover;" />
+        </div>
+        """
+    else:
+        return f"""
+        <div style="width: {size}px; height: {size}px; border-radius: 50%; background: var(--panel2); 
+                    border: 2px solid var(--border); display: flex; align-items: center; justify-content: center;">
+            <span style="font-size: {size//3}px;">🤖</span>
+        </div>
+        """
+
+def map_ia_status(status: str) -> str:
+    """Mapeia status das IAs para semáforo"""
+    if not status:
+        return "🔴"
+    
+    status_upper = str(status).upper()
+    
+    if status_upper == "GREEN":
+        return "🟢"
+    elif status_upper in ["AMBER", "YELLOW", "PENDING", "STANDBY"]:
+        return "🟡"
+    else:
+        return "🔴"
+
+def map_slot_status(status: str) -> str:
+    """Mapeia status dos slots para semáforo"""
+    if not status:
+        return "🔴"
+    
+    status_upper = str(status).upper()
+    
+    if status_upper in ["ACTIVE", "RUNNING", "ON", "GREEN"]:
+        return "🟢"
+    elif status_upper in ["PAUSED", "PENDING", "AMBER"]:
+        return "🟡"
+    else:
+        return "🔴"
+
+def get_usd_to_brl_rate():
+    """Obtém cotação USD→BRL via API do Core ou fallback"""
+    try:
+        # Tenta pegar cotação via API do Core
+        version_data = api_client.get_version()
+        if isinstance(version_data, dict) and 'usd_brl_rate' in version_data:
+            return float(version_data['usd_brl_rate'])
+        
+        # Fallback se Core não fornecer
+        return None
+    except Exception:
+        return None
+
+def convert_usd_to_brl(usd_amount):
+    """Converte USD para BRL usando cotação do Core"""
+    if usd_amount is None:
+        return None
+    
+    try:
+        rate = get_usd_to_brl_rate()
+        if rate:
+            return float(usd_amount) * rate
+        return None
+    except (ValueError, TypeError):
+        return None
+
+# -------------------------
+# CACHE FUNCTIONS
+# -------------------------
+@st.cache_data(ttl=5)
+def _cached_orchestration_state():
+    """Cache leve para estado de orquestração"""
+    return api_client.get_orchestration_state() or {}
+
+@st.cache_data(ttl=5)
+def _cached_ia_health():
+    """Cache leve para health das IAs"""
+    return api_client.get_ia_health() or []
+
+@st.cache_data(ttl=5)
+def _cached_exchange_health():
+    """Cache leve para health das exchanges"""
+    return api_client.get_exchange_health() or []
+
+@st.cache_data(ttl=5)
+def _cached_slots():
+    """Cache leve para slots"""
+    return api_client.get_slots() or []
+
+@st.cache_data(ttl=5)
+def _cached_wallet_details():
+    """Cache leve para detalhes da carteira"""
+    return api_client.get_wallet_details() or {}
+
+# -------------------------
+# PROMETHEUS FALLBACK FUNCTIONS
+# -------------------------
+
+# Instância global do cliente Prometheus
+_prometheus_client = None
+
+def get_prometheus_client():
+    """Obtém instância do cliente Prometheus"""
+    global _prometheus_client
+    if _prometheus_client is None:
+        _prometheus_client = prom.PrometheusClient()
+    return _prometheus_client
+
+def get_exchange_balances_direct():
+    """
+    Obtém saldos das exchanges via Prometheus (dados reais dos exporters)
+    Retorna: {"exchange_name": {"total_usd": float, "status": str, "connected": bool}}
+    """
+    exchanges_config = {
+        "binance": {
+            "api_key": os.getenv("BINANCE_API_KEY"),
+            "secret": os.getenv("BINANCE_API_SECRET"),
+        },
+        "kucoin": {
+            "api_key": os.getenv("KUCOIN_API_KEY"),
+            "secret": os.getenv("KUCOIN_API_SECRET"),
+        },
+        "bybit": {
+            "api_key": os.getenv("BYBIT_API_KEY"),
+            "secret": os.getenv("BYBIT_API_SECRET"),
+        },
+        "coinbase": {
+            "api_key": os.getenv("COINBASE_API_KEY"),
+            "private_key": os.getenv("COINBASE_PRIVATE_KEY_PEM")
+        },
+        "okx": {
+            "api_key": os.getenv("OKX_API_KEY"),
+            "secret": os.getenv("OKX_API_SECRET"),
+        }
+    }
+    
+    prom_client = get_prometheus_client()
+    results = {}
+    
+    for exchange_name, config in exchanges_config.items():
+        try:
+            # Verifica se tem credenciais mínimas
+            has_credentials = False
+            if exchange_name == "coinbase":
+                has_credentials = bool(config.get("api_key") and config.get("private_key"))
+            else:
+                has_credentials = bool(config.get("api_key") and config.get("secret"))
+            
+            if not has_credentials:
+                results[exchange_name] = {
+                    "total_usd": 0,
+                    "status": "NOT_CONFIGURED",
+                    "connected": False
+                }
+                continue
+            
+            # Obtém dados reais do Prometheus
+            equity_usdt = prom_client.get_exchange_equity_usdt(exchange_name)
+            is_connected = prom_client.get_exchange_connection_status(exchange_name)
+            
+            if is_connected and equity_usdt > 0:
+                status = "CONNECTED"
+            elif is_connected:
+                status = "CONNECTED_NO_BALANCE"
+            elif equity_usdt > 0:
+                status = "CONFIGURED"  # Tem dados mas status desconectado
+            else:
+                status = "CONFIGURED"  # Credenciais OK mas sem dados
+            
+            results[exchange_name] = {
+                "total_usd": equity_usdt,
+                "status": status,
+                "connected": is_connected
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching {exchange_name} balance: {e}")
+            results[exchange_name] = {
+                "total_usd": 0,
+                "status": "ERROR",
+                "connected": False
+            }
+    
+    return results
+
+def get_system_kpis_with_fallback():
+    """
+    Obtém KPIs do sistema usando API + fallback Prometheus
+    Retorna: {"ias_active": int, "exchanges_online": int, "balance_usd": float, "slots_active": int}
+    """
+    # Tenta primeiro via API
+    ias = _cached_ia_health()
+    exchanges = _cached_exchange_health()
+    state = _cached_orchestration_state()
+    slots = _cached_slots()
+    wallet_data = _cached_wallet_details()
+    
+    # Calcula KPIs da API
+    ias_active = len([ia for ia in ias if safe_get(ia, "status") == "GREEN"])
+    exchanges_online = len([ex for ex in exchanges if safe_get(ex, "status") == "GREEN"])
+    balance_usd = safe_get(state, "wallet", {}).get("total_balance") or safe_get(wallet_data, "total_balance", 0)
+    slots_active = len([slot for slot in slots if safe_get(slot, "status") in ["ACTIVE", "RUNNING", "ON", "GREEN"]])
+    
+    # Se API não retornou dados válidos, usa Prometheus como fallback
+    if not ias and not exchanges and not slots and balance_usd == 0:
+        try:
+            prom_client = get_prometheus_client()
+            
+            # Fallback para balance via Prometheus
+            if balance_usd == 0:
+                balance_usd = prom_client.get_equity_usdt()
+            
+            # Fallback para slots via Prometheus  
+            if slots_active == 0:
+                slots_active = prom_client.get_active_slots()
+            
+            # Para IAs e exchanges, usa valores base se não tem conexão real
+            if ias_active == 0 and prom_client.get_connection_status():
+                ias_active = 1  # Assume pelo menos 1 IA ativa se há conexão
+            
+            if exchanges_online == 0 and prom_client.get_connection_status():
+                exchanges_online = 1  # Assume pelo menos 1 exchange online se há conexão
+                
+        except Exception as e:
+            logger.warning(f"Fallback Prometheus falhou: {e}")
+    
+    return {
+        "ias_active": ias_active,
+        "total_ias": len(ias) if ias else (1 if ias_active > 0 else 0),
+        "exchanges_online": exchanges_online,
+        "total_exchanges": len(exchanges) if exchanges else (1 if exchanges_online > 0 else 0),
+        "balance_usd": balance_usd,
+        "slots_active": slots_active,
+        "total_slots": len(slots) if slots else slots_active
+    }
+
+# -------------------------
+# GRAFANA FUNCTIONS
+# -------------------------
+def test_grafana_dashboard(uid: str) -> bool:
+    """Testa se um dashboard do Grafana está acessível"""
+    if not uid:
+        return False
+    
+    try:
+        import requests
+        url = f"{GRAFANA_URL}/api/dashboards/uid/{uid}"
+        response = requests.get(url, timeout=3)
+        return response.status_code == 200
+    except Exception:
+        return False
+
+def render_grafana_panel(uid: str, panel_id: int, height: int = 400, title: str = "") -> None:
+    """Renderiza um painel do Grafana via iframe"""
+    if not uid:
+        st.warning(f"UID do dashboard {title} não configurado")
+        return
+    
+    # Testa se o dashboard está acessível
+    if not test_grafana_dashboard(uid):
+        st.warning(f"Dashboard {title} ({uid}) indisponível")
+        return
+    
+    embed_url = f"{GRAFANA_URL}/d-solo/{uid}?orgId=1&refresh=10s&panelId={panel_id}"
+    
+    st.markdown(f"""
+    <div class="grafana-embed">
+        <iframe src="{embed_url}" 
+                width="100%" 
+                height="{height}" 
+                frameborder="0">
+        </iframe>
+    </div>
+    """, unsafe_allow_html=True)
+
+def render_interactive_symbol_selector():
+    """Renderiza seletor interativo de símbolos para painel dinâmico"""
+    if not st.session_state.get("selected_symbol"):
+        st.session_state.selected_symbol = "BTC/USDT"
+    
+    # Lista de símbolos populares
+    symbols = [
+        "BTC/USDT", "ETH/USDT", "BNB/USDT", "ADA/USDT", "XRP/USDT",
+        "SOL/USDT", "DOGE/USDT", "DOT/USDT", "AVAX/USDT", "MATIC/USDT"
+    ]
+    
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        selected = st.selectbox(
+            "Selecionar símbolo para análise:",
+            symbols,
+            index=symbols.index(st.session_state.selected_symbol) if st.session_state.selected_symbol in symbols else 0
+        )
+    
+    with col2:
+        if st.button("📊 Atualizar", use_container_width=True):
+            st.session_state.selected_symbol = selected
+            st.rerun()
+    
+    return selected
+
+# -------------------------
+# TAB RENDERING FUNCTIONS
+# -------------------------
+
+def render_overview_tab():
+    """📊 Overview - Visão Geral do Mercado com Carteiras e KPIs Reais"""
+    
+    if not api_client.is_api_available():
+        st.error("🚨 API INDISPONÍVEL - Sistema não pode ser monitorado")
+        return
+    
+    # Busca dados com cache
+    exchanges = _cached_exchange_health()
+    wallet_data = _cached_wallet_details()
+    state = _cached_orchestration_state()
+    ias = _cached_ia_health()
+    slots = _cached_slots()
+    
+    # ========== DASHBOARD DINÂMICA DO GRAFANA (TOPO) ==========
+    st.markdown('<div class="section-header">📈 Visão geral do mercado</div>', unsafe_allow_html=True)
+    
+    # Embed da dashboard dinâmica completa no topo (maveretta-dynamic-live)
+    render_full_dashboard("dynamic", height=900, title="")
+    
+    # ========== KPIs PRINCIPAIS DO SISTEMA ==========
+    st.markdown('<div class="section-header">⚡ KPIs do Sistema</div>', unsafe_allow_html=True)
+    
+    # Obtém KPIs com fallback do Prometheus
+    kpis = get_system_kpis_with_fallback()
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    # KPI IAs Ativas
+    ias_active = kpis["ias_active"]
+    total_ias = kpis["total_ias"]
+    
+    with col1:
+        if total_ias > 0:
+            ia_percentage = (ias_active / total_ias) * 100
+            color_class = "kpi-card" if ia_percentage >= 80 else "metric-card-warning" if ia_percentage >= 50 else "metric-card-danger"
+        else:
+            ia_percentage = 0
+            color_class = "metric-card-danger"
+        
+        st.markdown(f"""
+        <div class="{color_class}">
+            <h3 style="margin:0; color: var(--text);">{ias_active}/{total_ias}</h3>
+            <p style="margin:0; color: var(--muted); font-size: 0.9rem;">IAs Ativas</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # KPI Exchanges Conectadas
+    exchanges_online = kpis["exchanges_online"]
+    total_exchanges = kpis["total_exchanges"]
+    
+    with col2:
+        if total_exchanges > 0:
+            exchange_percentage = (exchanges_online / total_exchanges) * 100
+            color_class = "kpi-card" if exchange_percentage >= 80 else "metric-card-warning" if exchange_percentage >= 50 else "metric-card-danger"
+        else:
+            exchange_percentage = 0
+            color_class = "metric-card-danger"
+        
+        st.markdown(f"""
+        <div class="{color_class}">
+            <h3 style="margin:0; color: var(--text);">{exchanges_online}/{total_exchanges}</h3>
+            <p style="margin:0; color: var(--muted); font-size: 0.9rem;">Exchanges Online</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # KPI Balance Total
+    total_balance = kpis["balance_usd"]
+    
+    with col3:
+        balance_color_class = "kpi-card" if total_balance > 0 else "metric-card-warning"
+        st.markdown(f"""
+        <div class="{balance_color_class}">
+            <h3 style="margin:0; color: var(--text);">{fmt_money(total_balance, '$')}</h3>
+            <p style="margin:0; color: var(--muted); font-size: 0.9rem;">Balance Total</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # KPI Slots Ativos
+    slots_active = kpis["slots_active"]
+    total_slots = kpis["total_slots"]
+    
+    with col4:
+        slots_color_class = "kpi-card" if slots_active > 0 else "metric-card-neutral"
+        st.markdown(f"""
+        <div class="{slots_color_class}">
+            <h3 style="margin:0; color: var(--text);">{slots_active}/{total_slots}</h3>
+            <p style="margin:0; color: var(--muted); font-size: 0.9rem;">Slots Ativos</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # ========== CARTEIRAS DAS EXCHANGES ==========
+    st.markdown('<div class="section-header">💰 Carteiras das Exchanges</div>', unsafe_allow_html=True)
+    
+    # Lista de exchanges suportadas
+    supported_exchanges = ["binance", "kucoin", "bybit", "coinbase", "okx"]
+    
+    # Obtém cotação USD→BRL
+    usd_brl_rate = get_usd_to_brl_rate()
+    
+    # Busca saldos das exchanges (API + fallback direto)
+    direct_balances = get_exchange_balances_direct()
+    
+    # Organiza exchanges em grid
+    cols = st.columns(min(len(supported_exchanges), 5))
+    
+    total_usd = 0
+    
+    for idx, exchange_name in enumerate(supported_exchanges):
+        with cols[idx % 5]:
+            # Obtém dados REAIS do Prometheus via exporters
+            direct_info = direct_balances.get(exchange_name, {})
+            balance_usd = direct_info.get("total_usd", 0)
+            direct_status = direct_info.get("status", "NOT_CONFIGURED")
+            is_connected = direct_info.get("connected", False)
+            
+            # Calcula BRL usando cotação
+            balance_brl = convert_usd_to_brl(balance_usd) if balance_usd and usd_brl_rate else None
+            
+            # Renderiza card baseado em dados REAIS do Prometheus
+            if direct_status == "CONNECTED" and balance_usd > 0:
+                # Exchange conectada e com saldo
+                total_usd += balance_usd
+                st.markdown(f"""
+                <div class="metric-card-success">
+                    <h4 style="margin:0; color: var(--text);">{exchange_name.title()}</h4>
+                    <p style="margin:0.25rem 0; color: var(--green); font-weight: bold;">🟢 Conectada</p>
+                    <p style="margin:0; color: var(--text); font-size: 0.9rem;">
+                        USD: {fmt_money(balance_usd, '$')}<br>
+                        {'BRL: ' + fmt_money(balance_brl, 'R$') if balance_brl else 'BRL: calculando...'}
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+            elif direct_status in ["CONNECTED", "CONNECTED_NO_BALANCE", "CONFIGURED"] and balance_usd > 0:
+                # Tem saldo mas pode não estar conectado no momento
+                total_usd += balance_usd
+                st.markdown(f"""
+                <div class="metric-card-success">
+                    <h4 style="margin:0; color: var(--text);">{exchange_name.title()}</h4>
+                    <p style="margin:0.25rem 0; color: var(--green); font-weight: bold;">🟢 Com Saldo</p>
+                    <p style="margin:0; color: var(--text); font-size: 0.9rem;">
+                        USD: {fmt_money(balance_usd, '$')}<br>
+                        {'BRL: ' + fmt_money(balance_brl, 'R$') if balance_brl else 'BRL: calculando...'}
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+            elif direct_status in ["CONNECTED", "CONFIGURED"]:
+                # Exchange configurada mas sem saldo
+                st.markdown(f"""
+                <div class="metric-card-warning">
+                    <h4 style="margin:0; color: var(--text);">{exchange_name.title()}</h4>
+                    <p style="margin:0.25rem 0; color: var(--accent); font-weight: bold;">🟡 Configurada</p>
+                    <p style="margin:0; color: var(--muted); font-size: 0.9rem;">Sem saldo ou aguardando sync</p>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                # Exchange não configurada
+                st.markdown(f"""
+                <div class="metric-card-unconfigured">
+                    <h4 style="margin:0; color: var(--text);">{exchange_name.title()}</h4>
+                    <p style="margin:0.25rem 0; color: var(--muted); font-weight: bold;">⚪ Não Configurada</p>
+                    <p style="margin:0; color: var(--muted); font-size: 0.9rem;">API keys ausentes no .env</p>
+                </div>
+                """, unsafe_allow_html=True)
+    
+    # Total geral
+    if total_usd > 0:
+        total_brl = convert_usd_to_brl(total_usd)
+        st.markdown(f"""
+        <div style="margin-top: 1rem; padding: 1rem; background: var(--panel2); border-radius: 8px; text-align: center;">
+            <h3 style="margin:0; color: var(--accent);">💰 Total Geral</h3>
+            <p style="margin:0.5rem 0; color: var(--text); font-size: 1.2rem;">
+                <strong>USD: {fmt_money(total_usd, '$')}</strong>
+                {' | <strong>BRL: ' + fmt_money(total_brl, 'R$') + '</strong>' if total_brl else ' | BRL: cotação indisponível'}
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # ========== KPIs POR EXCHANGE (PAINÉIS GRAFANA REAIS) ==========
+    st.markdown('<div class="section-header">📊 KPIs por Exchange (Dados Reais)</div>', unsafe_allow_html=True)
+    st.markdown('<p style="color: var(--muted); margin-bottom: 1rem;">Painéis exibindo equity USD/BRL, latência, health e atividade de cada exchange configurada.</p>', unsafe_allow_html=True)
+    
+    # Mapeamento de exchanges para seus dashboards
+    exchange_dashboards = {
+        "Binance": ("binance", "maveretta-overview-live"),  # Usando overview para binance
+        "KuCoin": ("kucoin", "maveretta-kucoin-live"),
+        "Bybit": ("bybit", "maveretta-bybit-live"),
+        "Coinbase": ("coinbase", "maveretta-coinbase-live"),
+        "OKX": ("okx", "maveretta-okx-live")
+    }
+    
+    # Renderiza painéis de cada exchange em tabs
+    exchange_tabs = st.tabs(list(exchange_dashboards.keys()))
+    
+    for tab_idx, (exchange_name, (dashboard_key, dashboard_uid)) in enumerate(exchange_dashboards.items()):
+        with exchange_tabs[tab_idx]:
+            # Renderiza o dashboard completo da exchange específica
+            if dashboard_key == "binance":
+                # Para binance, usamos overview
+                render_full_dashboard("overview", height=600, title=f"")
+            else:
+                # Para outras, usamos dashboards específicos
+                try:
+                    # Verifica se dashboard existe criando embed direto
+                    grafana_url = GRAFANA_URL.rstrip('/')
+                    iframe_url = f"{grafana_url}/d/{dashboard_uid}/?orgId=1&theme=dark&kiosk=tv"
+                    st.markdown(f"""
+                    <iframe src="{iframe_url}" width="100%" height="600" frameborder="0"></iframe>
+                    """, unsafe_allow_html=True)
+                except Exception as e:
+                    st.warning(f"⚠️ Dashboard de {exchange_name} não disponível: {str(e)}")
+    
+    # ========== TOP 10 + GRÁFICO DE PREÇOS EM TEMPO REAL ==========
+    st.markdown('<div class="section-header">📊 Análise de Ativos</div>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**📈 Top 10 Preços**")
+        # Painel Top 10 da dashboard maveretta-overview-live
+        render_grafana_panel("overview", panel_id=2, height=350, title="")
+    
+    with col2:
+        st.markdown("**📊 Gráfico de Preços em Tempo Real**")
+        # Painel de preços em tempo real da dashboard maveretta-overview-live
+        render_grafana_panel("overview", panel_id=3, height=350, title="")
+    
+    # ========== PAINÉIS MAPEADOS DO GRAFANA (INTEGRAÇÃO COMPLETA) ==========
+    st.markdown('<div class="section-header">🎯 Métricas de Consenso e Agentes</div>', unsafe_allow_html=True)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    # Consensus Rounds (1h)
+    with col1:
+        consensus_rounds = prom_query_value("sum(increase(agent_consensus_rounds_total[1h]))")
+        st.metric("Consensus Rounds (1h)", f"{int(consensus_rounds)}")
+    
+    # Consensus Approved (1h)
+    with col2:
+        consensus_approved = prom_query_value("sum(increase(agent_consensus_approved_total[1h]))")
+        st.metric("Consensus Approved (1h)", f"{int(consensus_approved)}")
+    
+    # Approval Rate (1h)
+    with col3:
+        approval_rate_expr = "sum(increase(agent_consensus_approved_total[1h])) / sum(increase(agent_consensus_rounds_total[1h])) * 100"
+        approval_rate = prom_query_value(approval_rate_expr, 0)
+        st.metric("Approval Rate (1h)", f"{approval_rate:.1f}%")
+    
+    # Total Open Positions
+    with col4:
+        open_positions = prom_query_value("sum(agent_positions_open)")
+        st.metric("Total Open Positions", f"{int(open_positions)}")
+    
+    # ========== EXCHANGE CONNECTION STATUS ==========
+    st.markdown('<div class="section-header">🔗 Status de Conexões</div>', unsafe_allow_html=True)
+    
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    exchanges_to_check = [
+        ("Binance", "up{job=\"binance-exporter\"}"),
+        ("Bybit", "up{job=\"bybit-exporter\"}"),
+        ("Coinbase", "up{job=\"coinbase-exporter\"}"),
+        ("KuCoin", "up{job=\"kucoin-exporter\"}"),
+        ("OKX", "up{job=\"okx-exporter\"}")
+    ]
+    
+    for idx, (name, query) in enumerate(exchanges_to_check):
+        col = [col1, col2, col3, col4, col5][idx]
+        with col:
+            status = prom_query_value(query, 0)
+            status_text = "🟢 Online" if status == 1 else "🔴 Offline"
+            color = "green" if status == 1 else "red"
+            st.markdown(f"**{name}**")
+            st.markdown(f'<p style="color: {color};">{status_text}</p>', unsafe_allow_html=True)
+    
+    # ========== MARKET METRICS ==========
+    st.markdown('<div class="section-header">📊 Métricas de Mercado</div>', unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns(3)
+    
+    # Current Price (BTC)
+    with col1:
+        btc_price = prom_query_value("binance_last_price{symbol=\"BTCUSDT\"}")
+        st.metric("BTC/USDT Price", f"${btc_price:,.2f}")
+    
+    # 24h Volume
+    with col2:
+        btc_volume = prom_query_value("binance_volume_24h{symbol=\"BTCUSDT\"}")
+        st.metric("24h Volume (BTC)", f"{btc_volume:,.0f}")
+    
+    # Connection Status
+    with col3:
+        conn_status = prom_query_value("binance_connection_status", 0)
+        status_text = "🟢 Connected" if conn_status == 1 else "🔴 Disconnected"
+        st.metric("Connection Status", status_text)
+    
+    # ========== INFRASTRUCTURE METRICS ==========
+    st.markdown('<div class="section-header">🖥️ Métricas de Infraestrutura</div>', unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns(3)
+    
+    # Services Status
+    with col1:
+        services_up = prom_query_value("sum(up{job=~\".*\"})")
+        st.metric("Services Online", f"{int(services_up)}")
+    
+    # Network Traffic
+    with col2:
+        network_tx = prom_query_value("rate(node_network_transmit_bytes_total{device!~\"lo|veth.*\"}[5m])")
+        st.metric("Network TX Rate", f"{network_tx:,.0f} B/s")
+    
+    # Disk I/O
+    with col3:
+        disk_io = prom_query_value("rate(node_disk_writes_completed_total[5m])")
+        st.metric("Disk Writes/s", f"{disk_io:,.2f}")
+    
+    # ========== ARBITRAGE METRICS ==========
+    st.markdown('<div class="section-header">💱 Arbitragem</div>', unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns(3)
+    
+    # Arbitrage Success Rate
+    with col1:
+        arb_success_rate_expr = "rate(arb_legs_success_total[5m]) / (rate(arb_legs_success_total[5m]) + rate(arb_legs_fail_total[5m])) * 100"
+        arb_success = prom_query_value(arb_success_rate_expr, 0)
+        st.metric("Arbitrage Success Rate", f"{arb_success:.1f}%")
+    
+    # Auto-Hedge Events
+    with col2:
+        hedge_events = prom_query_value("arb_legs_hedge_total")
+        st.metric("Auto-Hedge Events", f"{int(hedge_events)}")
+    
+    # IA Status
+    with col3:
+        ia_status = prom_query_value("ia_state")
+        st.metric("IA Status", f"{int(ia_status)}")
+    
+    # ========== RISK METRICS ==========
+    st.markdown('<div class="section-header">⚠️ Métricas de Risco</div>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    # Risk Blocked Reasons
+    with col1:
+        st.markdown("**Risk Blocked by Reason**")
+        risk_series = prom_query_series("sum by (reason) (increase(agent_risk_dynamic_blocked_total[5m]))")
+        if risk_series:
+            risk_data = {item["metric"].get("reason", "unknown"): float(item["value"][1]) for item in risk_series}
+            if risk_data:
+                st.bar_chart(risk_data)
+            else:
+                st.info("No risk blocks in last 5m")
+        else:
+            st.info("No data available")
+    
+    # Exchange Status
+    with col2:
+        st.markdown("**Exchange Status**")
+        exchange_status = prom_query_value("exchange_state", 0)
+        st.metric("Exchange State", f"{int(exchange_status)}")
+        
+        # Rate Limit Status
+        rate_limit = prom_query_value("exchange_rate_limit_remaining", 0)
+        st.metric("Rate Limit Remaining", f"{int(rate_limit)}")
+    
+    # ========== ADDITIONAL KPIS ==========
+    st.markdown('<div class="section-header">📈 KPIs Adicionais</div>', unsafe_allow_html=True)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    # ATR Médio
+    with col1:
+        atr_avg = prom_query_value("avg(risk_atr_14)")
+        st.metric("ATR Médio", f"{atr_avg:.4f}")
+    
+    # WebSocket Messages
+    with col2:
+        ws_messages = prom_query_value("rate(binance_websocket_messages_total[1m]) * 60")
+        st.metric("WS Messages/min", f"{int(ws_messages)}")
+    
+    # Latency
+    with col3:
+        latency = prom_query_value("binance_latency_seconds") * 1000
+        st.metric("Latency", f"{latency:.2f} ms")
+    
+    # Cycles Completed
+    with col4:
+        cycles = prom_query_value("sum(increase(bot_cycles_completed_total[1h]))")
+        st.metric("Cycles (1h)", f"{int(cycles)}")
+
+def render_operacoes_tab():
+    """📈 Operações - Histórico de Trades (FASE 3)"""
+    st.markdown('<div class="section-header">📈 Operações</div>', unsafe_allow_html=True)
+    
+    if not api_client.is_api_available():
+        st.error("🚨 API INDISPONÍVEL")
+        return
+    
+    # ========== RESUMO ESTATÍSTICO ==========
+    st.markdown("### 📊 Visão Geral das Operações")
+    
+    try:
+        stats = api_client.get("/v1/operations/stats/summary")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric(
+                "Total de Operações",
+                stats.get("total_operations", 0),
+                delta=f"{stats.get('closed', 0)} fechadas"
+            )
+        
+        with col2:
+            st.metric(
+                "Operações Abertas",
+                stats.get("open", 0),
+                delta="Em andamento"
+            )
+        
+        with col3:
+            total_pnl = stats.get("total_pnl", 0)
+            st.metric(
+                "P&L Total",
+                f"${total_pnl:,.2f}",
+                delta=f"Média: ${stats.get('avg_pnl', 0):.2f}"
+            )
+        
+        with col4:
+            win_rate = stats.get("win_rate", 0)
+            st.metric(
+                "Taxa de Sucesso",
+                f"{win_rate:.1f}%",
+                delta=f"{stats.get('winning_trades', 0)} wins"
+            )
+    
+    except Exception as e:
+        st.error(f"Erro ao carregar estatísticas: {e}")
+    
+    # ========== FILTROS ==========
+    st.markdown("### 🔍 Filtrar Operações")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        filter_status = st.selectbox(
+            "Status",
+            ["Todas", "Abertas", "Fechadas", "Canceladas"],
+            help="Filtrar por status da operação"
+        )
+    
+    with col2:
+        filter_exchange = st.selectbox(
+            "Exchange",
+            ["Todas", "Binance", "KuCoin", "Bybit", "Coinbase", "OKX"]
+        )
+    
+    with col3:
+        filter_symbol = st.text_input(
+            "Par",
+            placeholder="Ex: BTC/USDT",
+            help="Deixe vazio para ver todos"
+        )
+    
+    with col4:
+        limit = st.number_input(
+            "Limite",
+            min_value=10,
+            max_value=500,
+            value=50,
+            step=10,
+            help="Número máximo de operações"
+        )
+    
+    # ========== BUSCAR OPERAÇÕES ==========
+    try:
+        params = {"limit": limit}
+        
+        status_map = {
+            "Todas": None,
+            "Abertas": "open",
+            "Fechadas": "closed",
+            "Canceladas": "cancelled"
+        }
+        selected_status = status_map.get(filter_status)
+        if selected_status:
+            params["status"] = selected_status
+        
+        if filter_exchange != "Todas":
+            params["exchange"] = filter_exchange.lower()
+        
+        if filter_symbol:
+            params["symbol"] = filter_symbol.upper()
+        
+        operations = api_client.get("/v1/operations", params=params)
+        
+        if operations and len(operations) > 0:
+            # Converter para DataFrame
+            df = pd.DataFrame(operations)
+            
+            # Formatar colunas
+            if "pnl" in df.columns:
+                df["P&L USD"] = df["pnl"].apply(lambda x: f"${x:,.2f}" if x is not None else "–")
+            else:
+                df["P&L USD"] = "–"
+            
+            if "pnl_pct" in df.columns:
+                df["P&L %"] = df["pnl_pct"].apply(lambda x: f"{x:.2f}%" if x is not None else "–")
+            else:
+                df["P&L %"] = "–"
+            
+            if "opened_at" in df.columns:
+                try:
+                    df["Abertura"] = pd.to_datetime(df["opened_at"]).dt.strftime("%Y-%m-%d %H:%M")
+                except:
+                    df["Abertura"] = df["opened_at"]
+            else:
+                df["Abertura"] = "–"
+            
+            if "closed_at" in df.columns:
+                try:
+                    df["Fechamento"] = pd.to_datetime(df["closed_at"]).dt.strftime("%Y-%m-%d %H:%M")
+                except:
+                    df["Fechamento"] = df["closed_at"]
+            else:
+                df["Fechamento"] = "–"
+            
+            # Renomear colunas para exibição
+            df = df.rename(columns={
+                "id": "ID",
+                "symbol": "Par",
+                "exchange": "Exchange",
+                "side": "Lado",
+                "status": "Status",
+                "entry_price": "Preço Entrada",
+                "exit_price": "Preço Saída",
+                "quantity": "Qtd"
+            })
+            
+            # Selecionar colunas para exibir
+            display_columns = ["ID", "Par", "Exchange", "Lado", "Status", "Preço Entrada", "Preço Saída", "Qtd", "P&L USD", "P&L %", "Abertura", "Fechamento"]
+            display_columns = [col for col in display_columns if col in df.columns]
+            
+            # Exibir tabela
+            st.dataframe(
+                df[display_columns],
+                use_container_width=True,
+                height=400,
+                column_config={
+                    "ID": st.column_config.TextColumn("ID", width="medium"),
+                    "Par": st.column_config.TextColumn("Par", width="medium"),
+                    "Exchange": st.column_config.TextColumn("Exchange", width="medium"),
+                    "Lado": st.column_config.TextColumn("Lado", width="small"),
+                    "Status": st.column_config.TextColumn("Status", width="small"),
+                    "Preço Entrada": st.column_config.NumberColumn("Preço Entrada", format="$%.2f", width="medium"),
+                    "Preço Saída": st.column_config.NumberColumn("Preço Saída", format="$%.2f", width="medium"),
+                    "Qtd": st.column_config.NumberColumn("Qtd", format="%.8f", width="medium"),
+                    "Abertura": st.column_config.TextColumn("Abertura", width="large"),
+                    "Fechamento": st.column_config.TextColumn("Fechamento", width="large"),
+                }
+            )
+            
+            # ========== AÇÕES SOBRE OPERAÇÕES ==========
+            st.markdown("### 🎯 Ações")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Seletor de operação
+                open_operations_df = df[df["Status"] == "open"]
+                open_operations_ids = open_operations_df["ID"].tolist()
+                
+                if open_operations_ids:
+                    selected_op_id = st.selectbox(
+                        "Selecione uma operação aberta:",
+                        open_operations_ids,
+                        help="Escolha uma operação para forçar fechamento"
+                    )
+                    
+                    if st.button("🚨 Forçar Fechamento", type="primary"):
+                        try:
+                            response = api_client.post(f"/v1/operations/{selected_op_id}/close")
+                            if response.get("status") == "ok":
+                                st.success("✅ Comando de fechamento enviado. Verifique o status da operação.")
+                                time.sleep(2)
+                                st.rerun()
+                            else:
+                                st.warning(response.get("message", "Resposta inesperada"))
+                        except Exception as e:
+                            st.error(f"❌ Erro ao fechar operação: {e}")
+                else:
+                    st.info("Nenhuma operação aberta no momento para forçar fechamento.")
+            
+            with col2:
+                if st.button("🔄 Atualizar Lista", use_container_width=True):
+                    st.cache_data.clear()
+                    st.rerun()
+        
+        else:
+            st.info("📭 Nenhuma operação encontrada com os filtros selecionados")
+    
+    except Exception as e:
+        st.error(f"❌ Erro ao carregar operações: {e}")
+    
+    # ========== PAINÉIS MAPEADOS DO GRAFANA (MÉTRICAS DE OPERAÇÕES) ==========
+    st.markdown('<div class="section-header">🖥️ Métricas de Infraestrutura e Performance</div>', unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns(3)
+    
+    # CPU Usage
+    with col1:
+        cpu_usage = prom_query_value("100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)")
+        st.metric("CPU Usage", f"{cpu_usage:.1f}%")
+    
+    # Memory Usage
+    with col2:
+        mem_usage = prom_query_value("(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100")
+        st.metric("Memory Usage", f"{mem_usage:.1f}%")
+    
+    # Disk Usage
+    with col3:
+        disk_usage = prom_query_value("(1 - (node_filesystem_avail_bytes{fstype=~\"ext4|xfs\",mountpoint=\"/\"} / node_filesystem_size_bytes{fstype=~\"ext4|xfs\",mountpoint=\"/\"})) * 100")
+        st.metric("Disk Usage", f"{disk_usage:.1f}%")
+    
+    # ========== CONTAINER METRICS ==========
+    st.markdown('<div class="section-header">🐳 Métricas de Containers</div>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    # Container CPU Usage
+    with col1:
+        st.markdown("**Container CPU Usage**")
+        container_cpu_series = prom_query_series("sum by (container_label_com_docker_compose_service) (rate(container_cpu_usage_seconds_total[5m]))")
+        if container_cpu_series:
+            cpu_data = {item["metric"].get("container_label_com_docker_compose_service", "unknown"): float(item["value"][1]) * 100 for item in container_cpu_series}
+            if cpu_data:
+                st.bar_chart(cpu_data)
+            else:
+                st.info("No container data")
+        else:
+            st.info("No data available")
+    
+    # Container Memory Usage
+    with col2:
+        st.markdown("**Container Memory Usage**")
+        container_mem_series = prom_query_series("sum by (container_label_com_docker_compose_service) (container_memory_usage_bytes)")
+        if container_mem_series:
+            mem_data = {item["metric"].get("container_label_com_docker_compose_service", "unknown"): float(item["value"][1]) / (1024**3) for item in container_mem_series}
+            if mem_data:
+                st.bar_chart(mem_data)
+            else:
+                st.info("No container data")
+        else:
+            st.info("No data available")
+    
+    # ========== LATENCY METRICS ==========
+    st.markdown('<div class="section-header">⚡ Métricas de Latência</div>', unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns(3)
+    
+    # Average Latency
+    with col1:
+        avg_latency = prom_query_value("avg(binance_latency_seconds)") * 1000
+        st.metric("Avg Latency (Binance)", f"{avg_latency:.2f} ms")
+    
+    # Exchange Latency
+    with col2:
+        exchange_latency = prom_query_value("exchange_latency_ms")
+        st.metric("Exchange Latency", f"{exchange_latency:.2f} ms")
+    
+    # Clock Skew
+    with col3:
+        clock_skew = prom_query_value("exchange_skew_ms")
+        st.metric("Clock Skew", f"{clock_skew:.2f} ms")
+    
+    # ========== EXECUTION METRICS ==========
+    st.markdown('<div class="section-header">📊 Métricas de Execução</div>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    # Paper Trades PnL
+    with col1:
+        paper_pnl = prom_query_value("paper_trades_pnl_unrealized")
+        st.metric("Paper Trades PnL (Unrealized)", f"${paper_pnl:,.2f}")
+    
+    # Cross-Venue Execution Time
+    with col2:
+        exec_time = prom_query_value("histogram_quantile(0.95, arb_execution_time_seconds)")
+        st.metric("Cross-Venue Exec Time (p95)", f"{exec_time:.3f} s")
+
+def render_slots_tab():
+    """🎰 Slots - Alocação de Recursos"""
+    st.markdown('<div class="section-header">🎰 Slots de Alocação</div>', unsafe_allow_html=True)
+    
+    if not api_client.is_api_available():
+        st.error("🚨 API INDISPONÍVEL - Sistema não pode ser monitorado")
+        return
+    
+    # ========== DADOS REAIS DOS SLOTS ==========
+    slots = _cached_slots()
+    state = _cached_orchestration_state()
+    
+    # Complementa com dados do state se necessário
+    state_slots = safe_get(state, "slots", [])
+    if not slots and state_slots:
+        slots = state_slots
+    
+    if not slots:
+        st.info("🎰 Nenhum slot configurado no sistema")
+        return
+    
+    # ========== MÉTRICAS GERAIS ==========
+    col1, col2, col3, col4 = st.columns(4)
+    
+    total_slots = len(slots)
+    active_slots = len([s for s in slots if safe_get(s, "status") in ["ACTIVE", "RUNNING", "ON", "GREEN"]])
+    paused_slots = len([s for s in slots if safe_get(s, "status") in ["PAUSED", "PENDING", "AMBER"]])
+    stopped_slots = total_slots - active_slots - paused_slots
+    
+    with col1:
+        st.metric("Total de Slots", total_slots)
+    
+    with col2:
+        st.metric("🟢 Ativos", active_slots)
+    
+    with col3:
+        st.metric("🟡 Pausados", paused_slots)
+    
+    with col4:
+        st.metric("🔴 Parados", stopped_slots)
+    
+    # ========== LISTA DETALHADA DOS SLOTS ==========
+    st.markdown("### 📋 Detalhes dos Slots")
+    
+    # Separar por status
+    active_slot_list = [s for s in slots if safe_get(s, "status") in ["ACTIVE", "RUNNING", "ON", "GREEN"]]
+    paused_slot_list = [s for s in slots if safe_get(s, "status") in ["PAUSED", "PENDING", "AMBER"]]
+    stopped_slot_list = [s for s in slots if safe_get(s, "status") not in ["ACTIVE", "RUNNING", "ON", "GREEN", "PAUSED", "PENDING", "AMBER"]]
+    
+    # Slots Ativos
+    if active_slot_list:
+        st.markdown("**🟢 Slots Ativos**")
+        for slot in active_slot_list:
+            slot_id = safe_get(slot, "id", "N/A")
+            exchange = safe_get(slot, "exchange", "N/A")
+            strategy = safe_get(slot, "strategy") or safe_get(slot, "current_strategy") or safe_get(slot, "strategy_code") or "N/A"
+            allocation = safe_get(slot, "allocation") or safe_get(slot, "capital", 0)
+            pnl = safe_get(slot, "pnl", 0)
+            pnl_pct = safe_get(slot, "pnl_percentage", 0)
+            
+            col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
+            
+            with col1:
+                st.markdown(f"**{slot_id}** ({exchange})")
+            
+            with col2:
+                st.write(f"Estratégia: {strategy}")
+            
+            with col3:
+                st.write(f"Alocação: {fmt_money(allocation, '$')}")
+            
+            with col4:
+                pnl_color = "var(--green)" if pnl >= 0 else "var(--red)"
+                st.markdown(f'<span style="color: {pnl_color};">P&L: {fmt_money(pnl, "$")} ({fmt_pct(pnl_pct)})</span>', unsafe_allow_html=True)
+            
+            st.markdown("---")
+    
+    # Slots Pausados
+    if paused_slot_list:
+        st.markdown("**🟡 Slots Pausados**")
+        for slot in paused_slot_list:
+            slot_id = safe_get(slot, "id", "N/A")
+            exchange = safe_get(slot, "exchange", "N/A")
+            strategy = safe_get(slot, "strategy") or safe_get(slot, "current_strategy") or safe_get(slot, "strategy_code") or "N/A"
+            status = safe_get(slot, "status", "PAUSED")
+            
+            col1, col2, col3 = st.columns([2, 2, 2])
+            
+            with col1:
+                st.markdown(f"**{slot_id}** ({exchange})")
+            
+            with col2:
+                st.write(f"Estratégia: {strategy}")
+            
+            with col3:
+                st.write(f"Status: {status}")
+            
+            st.markdown("---")
+    
+    # Slots Parados
+    if stopped_slot_list:
+        st.markdown("**🔴 Slots Parados**")
+        for slot in stopped_slot_list:
+            slot_id = safe_get(slot, "id", "N/A")
+            exchange = safe_get(slot, "exchange", "N/A")
+            strategy = safe_get(slot, "strategy") or safe_get(slot, "current_strategy") or safe_get(slot, "strategy_code") or "N/A"
+            status = safe_get(slot, "status", "STOPPED")
+            
+            col1, col2, col3 = st.columns([2, 2, 2])
+            
+            with col1:
+                st.markdown(f"**{slot_id}** ({exchange})")
+            
+            with col2:
+                st.write(f"Estratégia: {strategy}")
+            
+            with col3:
+                st.write(f"Status: {status}")
+            
+            st.markdown("---")
+    
+    # ========== DASHBOARD GRAFANA ==========
+    st.markdown("### 📈 Dashboard dos Slots")
+    render_grafana_panel("slots", panel_id=1, height=400, title="Métricas dos Slots em Tempo Real")
+    
+    # ========== PAINÉIS MAPEADOS DO GRAFANA (MÉTRICAS DE SLOTS) ==========
+    st.markdown('<div class="section-header">🎰 Métricas de Slots</div>', unsafe_allow_html=True)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    # Slots Ativos
+    with col1:
+        slots_active = prom_query_value("bot_slots_active")
+        st.metric("Slots Ativos", f"{int(slots_active)}")
+    
+    # Ciclos Completados (1h)
+    with col2:
+        cycles_1h = prom_query_value("sum(increase(bot_cycles_completed_total[1h]))")
+        st.metric("Ciclos Completados (1h)", f"{int(cycles_1h)}")
+    
+    # Capital Total
+    with col3:
+        capital_total = prom_query_value("sum(binance_equity_usdt)")
+        st.metric("Capital Total (USDT)", f"${capital_total:,.2f}")
+    
+    # Taxa de Execução
+    with col4:
+        exec_rate = prom_query_value("rate(bot_cycles_completed_total[5m])")
+        st.metric("Taxa Exec (cycles/s)", f"{exec_rate:.4f}")
+    
+    # ========== SLOT STATE METRICS ==========
+    st.markdown('<div class="section-header">📊 Estados dos Slots</div>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    # Active Slots Count
+    with col1:
+        active_count = prom_query_value("count(slot_state > 0)")
+        st.metric("Active Slots Count", f"{int(active_count)}")
+    
+    # Slot State Changes
+    with col2:
+        state_changes = prom_query_value("increase(slot_state_changes_total[5m])")
+        st.metric("State Changes (5m)", f"{int(state_changes)}")
+    
+    # Slot State Distribution
+    st.markdown("**Distribuição de Estados dos Slots**")
+    slot_state_series = prom_query_series("count by (state) (slot_state)")
+    if slot_state_series:
+        state_data = {item["metric"].get("state", "unknown"): float(item["value"][1]) for item in slot_state_series}
+        if state_data:
+            st.bar_chart(state_data)
+        else:
+            st.info("No slot state data")
+    else:
+        st.info("No data available")
+
+def render_controles_tab():
+    """🎮 Controles - Controles do Sistema (FASE 3)"""
+    st.markdown('<div class="section-header">🎮 Controles do Sistema</div>', unsafe_allow_html=True)
+    
+    if not api_client.is_api_available():
+        st.error("🚨 API INDISPONÍVEL - Sistema não pode ser monitorado")
+        return
+    
+    # ========== STATUS GLOBAL ==========
+    st.markdown("### 📊 Status do Bot")
+    
+    try:
+        status = api_client.get("/v1/orchestration/status")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            state = status.get("state", "unknown")
+            state_emoji = {
+                "running": "🟢",
+                "paused": "🟡",
+                "stopped": "🔴",
+                "stopping": "🟠",
+                "emergency_stopped": "🚨"
+            }.get(state, "⚪")
+            st.metric("Estado", f"{state_emoji} {state.upper()}")
+        
+        with col2:
+            mode = status.get("mode", "auto")
+            mode_emoji = {"auto": "🤖", "manual": "👤", "simulation": "🧪"}.get(mode, "❓")
+            st.metric("Modo", f"{mode_emoji} {mode.upper()}")
+        
+        with col3:
+            emergency = status.get("emergency", False)
+            st.metric("Emergency", "🚨 ATIVO" if emergency else "✅ OK")
+    
+    except Exception as e:
+        st.error(f"Erro ao buscar status: {e}")
+    
+    # ========== CONTROLES PRINCIPAIS ==========
+    st.markdown("### 🎛️ Controles Principais")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        if st.button("▶️ INICIAR BOT", type="primary", use_container_width=True):
+            try:
+                response = api_client.post("/v1/orchestration/start")
+                if response.get("status") == "ok":
+                    st.success("✅ " + response.get("message", "Bot iniciado"))
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.warning(response.get("message", "Resposta inesperada"))
+            except Exception as e:
+                st.error(f"❌ Erro ao iniciar: {e}")
+    
+    with col2:
+        if st.button("⏸️ PAUSAR BOT", use_container_width=True):
+            try:
+                response = api_client.post("/v1/orchestration/pause")
+                if response.get("status") == "ok":
+                    st.warning("⏸️ " + response.get("message", "Bot pausado"))
+                    time.sleep(1)
+                    st.rerun()
+            except Exception as e:
+                st.error(f"❌ Erro ao pausar: {e}")
+    
+    with col3:
+        if st.button("⏹️ PARAR BOT", use_container_width=True):
+            try:
+                response = api_client.post("/v1/orchestration/stop")
+                if response.get("status") == "ok":
+                    st.info("⏹️ " + response.get("message", "Bot parado"))
+                    time.sleep(1)
+                    st.rerun()
+            except Exception as e:
+                st.error(f"❌ Erro ao parar: {e}")
+    
+    with col4:
+        if st.button("🚨 EMERGENCY STOP", use_container_width=True):
+            # Confirmação dupla para emergency stop
+            if "emergency_confirm" not in st.session_state:
+                st.session_state.emergency_confirm = False
+            
+            if not st.session_state.emergency_confirm:
+                st.session_state.emergency_confirm = True
+                st.warning("⚠️ Clique novamente para confirmar EMERGENCY STOP")
+            else:
+                try:
+                    response = api_client.post("/v1/orchestration/emergency-stop")
+                    if response.get("status") == "ok":
+                        st.error("🚨 " + response.get("message", "Emergency stop acionado"))
+                        st.session_state.emergency_confirm = False
+                        time.sleep(2)
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Erro no emergency stop: {e}")
+    
+    # ========== SELETOR DE MODO ==========
+    st.markdown("### 🔄 Modo de Operação")
+    
+    current_mode = status.get("mode", "auto") if 'status' in locals() else "auto"
+    
+    mode = st.radio(
+        "Selecione o modo de operação:",
+        ["🤖 Automático", "👤 Manual", "🧪 Simulação"],
+        index=["auto", "manual", "simulation"].index(current_mode),
+        horizontal=True,
+        help="""
+        **Automático**: Bot opera sozinho seguindo as estratégias
+        **Manual**: Bot sugere trades mas aguarda aprovação
+        **Simulação**: Paper trading (não executa ordens reais)
+        """
+    )
+    
+    if st.button("Aplicar Modo", type="secondary"):
+        mode_map = {
+            "🤖 Automático": "auto",
+            "👤 Manual": "manual",
+            "🧪 Simulação": "simulation"
+        }
+        try:
+            response = api_client.post("/v1/orchestration/mode", json={"mode": mode_map[mode]})
+            if response.get("status") == "ok":
+                st.success(f"✅ {response.get('message', 'Modo alterado')}")
+                time.sleep(1)
+                st.rerun()
+        except Exception as e:
+            st.error(f"❌ Erro ao alterar modo: {e}")
+    
+    # ========== GESTÃO DE RISCO ==========
+    st.markdown("### 🛡️ Gestão de Risco")
+    
+    # Valores padrão
+    default_risk_config = {
+        "max_exposure_pct": 50,
+        "max_loss_per_trade_pct": 2.0,
+        "max_daily_loss_pct": 5.0,
+        "max_open_positions": 5,
+        "trailing_stop_enabled": True,
+        "trailing_stop_pct": 2.0,
+        "min_confidence_pct": 70
+    }
+    
+    # Buscar configuração atual
+    try:
+        risk_config = api_client.get("/v1/risk/config")
+    except Exception as e:
+        st.warning(f"Não foi possível carregar a configuração de risco atual: {e}")
+        risk_config = default_risk_config
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("#### 📊 Limites Globais")
+        
+        max_exposure = st.slider(
+            "Exposição Máxima do Capital (%)",
+            min_value=0,
+            max_value=100,
+            value=int(risk_config.get("max_exposure_pct", 50)),
+            step=5,
+            help="Percentual máximo do capital que pode estar em risco simultaneamente"
+        )
+        
+        max_loss_per_trade = st.slider(
+            "Perda Máxima por Trade (%)",
+            min_value=0.0,
+            max_value=10.0,
+            value=float(risk_config.get("max_loss_per_trade_pct", 2.0)),
+            step=0.5,
+            help="Stop loss automático baseado no capital"
+        )
+        
+        max_daily_loss = st.slider(
+            "Perda Máxima Diária (%)",
+            min_value=0.0,
+            max_value=20.0,
+            value=float(risk_config.get("max_daily_loss_pct", 5.0)),
+            step=1.0,
+            help="Bot para automaticamente se perda diária atingir esse limite"
+        )
+    
+    with col2:
+        st.markdown("#### ⚙️ Parâmetros de Trading")
+        
+        max_open_positions = st.number_input(
+            "Máximo de Posições Abertas",
+            min_value=1,
+            max_value=20,
+            value=int(risk_config.get("max_open_positions", 5)),
+            step=1,
+            help="Número máximo de trades simultâneos"
+        )
+        
+        use_trailing_stop = st.checkbox(
+            "Usar Trailing Stop",
+            value=bool(risk_config.get("trailing_stop_enabled", True)),
+            help="Ajusta stop loss automaticamente conforme preço sobe"
+        )
+        
+        trailing_stop_pct = st.number_input(
+            "Trailing Stop (%)",
+            min_value=0.5,
+            max_value=10.0,
+            value=float(risk_config.get("trailing_stop_pct", 2.0)),
+            step=0.5,
+            disabled=not use_trailing_stop,
+            help="Distância percentual do trailing stop"
+        )
+        
+        min_confidence_pct = st.slider(
+            "Confiança Mínima para Executar (%)",
+            min_value=50,
+            max_value=100,
+            value=int(risk_config.get("min_confidence_pct", 70)),
+            step=5,
+            help="Trades só são executados se confiança >= esse valor"
+        )
+    
+    # Botão para salvar
+    if st.button("💾 Salvar Configuração de Risco", type="primary", use_container_width=True):
+        new_config = {
+            "max_exposure_pct": max_exposure,
+            "max_loss_per_trade_pct": max_loss_per_trade,
+            "max_daily_loss_pct": max_daily_loss,
+            "max_open_positions": max_open_positions,
+            "trailing_stop_enabled": use_trailing_stop,
+            "trailing_stop_pct": trailing_stop_pct,
+            "min_confidence_pct": min_confidence_pct
+        }
+        
+        try:
+            response = api_client.post("/v1/risk/config", json=new_config)
+            st.success("✅ Configuração de risco atualizada com sucesso")
+            time.sleep(1)
+            st.rerun()
+        except Exception as e:
+            st.error(f"❌ Erro ao salvar: {e}")
+    
+    # Preview de impacto
+    with st.expander("📈 Preview do Impacto"):
+        capital_exemplo = 10000.00
+        
+        max_exposure_value = capital_exemplo * max_exposure / 100
+        max_loss_per_trade_value = capital_exemplo * max_loss_per_trade / 100
+        max_daily_loss_value = capital_exemplo * max_daily_loss / 100
+        
+        capital_per_position = "N/A"
+        if max_open_positions > 0 and max_exposure_value > 0:
+            capital_per_position = f"${max_exposure_value / max_open_positions:,.2f}"
+        elif max_exposure_value > 0:
+            capital_per_position = f"${max_exposure_value:,.2f} (Limitado pela Exposição Máxima)"
+        elif max_open_positions > 0:
+            capital_per_position = f"$0.00 (Exposição Máxima 0%)"
+        
+        st.markdown(f"""
+        **Com a configuração atual (Capital Exemplo: ${capital_exemplo:,.2f}):**
+        
+        - **Exposição Máxima:** ${max_exposure_value:,.2f} ({max_exposure}%)
+        - **Risk por Trade:** ${max_loss_per_trade_value:,.2f} ({max_loss_per_trade}%)
+        - **Max Loss Diária:** ${max_daily_loss_value:,.2f} ({max_daily_loss}%)
+        - **Posições Simultâneas:** {max_open_positions}
+        - **Capital por Posição (Máximo):** {capital_per_position}
+        """)
+    
+    # ========== DASHBOARDS GRAFANA ==========
+    st.markdown("### 🤖 Saúde das IAs")
+    render_grafana_panel("ia_health", panel_id=1, height=350, title="")
+    
+    st.markdown("### 🏦 Saúde das Exchanges")
+    render_grafana_panel("venue_health", panel_id=1, height=350, title="")
+    
+    # ========== AÇÕES ADICIONAIS ==========
+    st.markdown("### 🔍 Ações do Sistema")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🔍 Verificar Saúde Completa", use_container_width=True):
+            try:
+                health = api_client.health()
+                if health.get("status") in ["ok", "healthy"]:
+                    st.success("✅ Sistema saudável")
+                else:
+                    st.error("❌ Sistema com problemas")
+            except Exception as e:
+                st.error(f"❌ Erro ao verificar saúde: {e}")
+    
+    with col2:
+        if st.button("📊 Recarregar Dados", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+
+def render_ia_insights_tab():
+    """🧠 IA Insights - Visão Detalhada das IAs"""
+    st.markdown("<div class=\"section-header\">🧠 IA Insights</div>", unsafe_allow_html=True)
+    
+    if not api_client.is_api_available():
+        st.error("🚨 API INDISPONÍVEL - Sistema não pode ser monitorado")
+        return
+
+    ias_health = api_client.get_ia_health()
+    if not ias_health:
+        st.info("Nenhuma IA disponível para exibir insights.")
+        return
+
+    ia_ids = [ia.get("id") for ia in ias_health if ia.get("id")]
+    selected_ia_id = st.selectbox("Selecione uma IA para ver os insights", ia_ids, key="ia_insights_selector")
+
+    if selected_ia_id:
+        ia_insights = api_client.get_ia_insights(selected_ia_id)
+        if ia_insights:
+            st.markdown(f"### Insights para {ia_insights.get('name', selected_ia_id)}")
+            st.write(f"**Descrição:** {ia_insights.get('description', 'N/A')}")
+            st.write(f"**Status:** {map_ia_status(ia_insights.get('status'))} {ia_insights.get('status', 'N/A')}")
+            st.write(f"**Uptime:** {ia_insights.get('uptime_h', 0):.1f} horas")
+            st.write(f"**Latência:** {ia_insights.get('latency_ms', 0)} ms")
+            st.write(f"**Última Decisão:** {ia_insights.get('last_decision', {}).get('timestamp', 'N/A')}")
+
+            st.markdown("#### Performance Recente")
+            recent_performance = ia_insights.get("recent_performance", {})
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("PNL (24h)", safe_get(recent_performance, "last_24h_pnl_pct", "N/A"))
+            with col2:
+                st.metric("Trades (24h)", safe_get(recent_performance, "trades_count_24h", "N/A"))
+            with col3:
+                st.metric("Win Rate (24h)", safe_get(recent_performance, "win_rate_24h", "N/A"))
+
+            st.markdown("#### Recomendações")
+            recommendations = ia_insights.get("recommendations", [])
+            if recommendations:
+                for rec in recommendations:
+                    st.markdown(f"- {rec}")
+            else:
+                st.info("Nenhuma recomendação disponível no momento.")
+        else:
+            st.warning(f"Não foi possível carregar insights para {selected_ia_id}.")
+    else:
+        st.info("Selecione uma IA para ver os insights.")
+    
+    # ========== DADOS REAIS DAS IAs ==========
+    ias = _cached_ia_health()
+    
+    if not ias:
+        st.info("🤖 Nenhuma IA reportada pelo sistema")
+        return
+    
+    # ========== OVERVIEW DAS IAs ==========
+    st.markdown("### 🤖 Status das Inteligências Artificiais")
+    
+    # Métricas gerais
+    col1, col2, col3, col4 = st.columns(4)
+    
+    total_ias = len(ias)
+    green_ias = len([ia for ia in ias if safe_get(ia, "status") == "GREEN"])
+    amber_ias = len([ia for ia in ias if safe_get(ia, "status") in ["AMBER", "YELLOW", "PENDING", "STANDBY"]])
+    red_ias = total_ias - green_ias - amber_ias
+    
+    with col1:
+        st.metric("Total de IAs", total_ias)
+    
+    with col2:
+        st.metric("🟢 Online", green_ias)
+    
+    with col3:
+        st.metric("🟡 Atenção", amber_ias)
+    
+    with col4:
+        st.metric("🔴 Offline", red_ias)
+    
+    # ========== DETALHES INDIVIDUAIS ==========
+    st.markdown("### 📊 Performance Individual")
+    
+    for ia in ias:
+        ia_id = safe_get(ia, "id", "N/A")
+        ia_name = safe_get(ia, "name", ia_id.split("_")[-1] if "_" in ia_id else ia_id)
+        ia_status = safe_get(ia, "status", "RED")
+        strategy = safe_get(ia, "strategy", "N/A")
+        pnl = safe_get(ia, "pnl", 0)
+        accuracy = safe_get(ia, "accuracy", 0)
+        uptime = safe_get(ia, "uptime", 0)
+        
+        # Determina cor do card baseado no status
+        if ia_status == "GREEN":
+            card_class = "metric-card-success"
+        elif ia_status in ["AMBER", "YELLOW", "PENDING", "STANDBY"]:
+            card_class = "metric-card-warning"
+        else:
+            card_class = "metric-card-danger"
+        
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            st.markdown(f"""
+            <div class="{card_class}">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <strong style="font-size: 1.1rem;">{ia_name}</strong>
+                    <span>{map_ia_status(ia_status)}</span>
+                </div>
+                <div style="font-size: 0.9rem; color: var(--text-secondary);">
+                    <div>Estratégia: {strategy}</div>
+                    <div>P&L: {fmt_money(pnl, '$')}</div>
+                    <div>Accuracy: {fmt_pct(accuracy)}</div>
+                    <div>Uptime: {fmt_pct(uptime)}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            # Avatar da IA baseado na posição (simplificado)
+            avatar_num = (hash(ia_id) % 7) + 1
+            avatar_html = render_avatar_with_fallback(avatar_num, 60)
+            st.markdown(f'<div style="text-align: center;">{avatar_html}</div>', unsafe_allow_html=True)
+    
+    # ========== INSIGHTS ADICIONAIS ==========
+    if any(safe_get(ia, "accuracy") for ia in ias):
+        st.markdown("### 📈 Métricas de Performance")
+        
+        # Calcula médias
+        avg_accuracy = sum(safe_get(ia, "accuracy", 0) for ia in ias if safe_get(ia, "accuracy")) / max(1, len([ia for ia in ias if safe_get(ia, "accuracy")]))
+        avg_pnl = sum(safe_get(ia, "pnl", 0) for ia in ias if safe_get(ia, "pnl")) / max(1, len(ias))
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown(f"""
+            <div class="kpi-card">
+                <h3 style="margin:0; color: var(--text);">{fmt_pct(avg_accuracy)}</h3>
+                <p style="margin:0; color: var(--muted); font-size: 0.9rem;">Accuracy Média</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown(f"""
+            <div class="kpi-card">
+                <h3 style="margin:0; color: var(--text);">{fmt_money(avg_pnl, '$')}</h3>
+                <p style="margin:0; color: var(--muted); font-size: 0.9rem;">P&L Médio</p>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    # ========== PAINÉIS MAPEADOS DO GRAFANA (MÉTRICAS DE IA) ==========
+    st.markdown('<div class="section-header">🤖 Métricas de Agentes e Decisões</div>', unsafe_allow_html=True)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    # Agent Status
+    with col1:
+        agent_running = prom_query_value("agent_running")
+        status_text = "🟢 Running" if agent_running == 1 else "🔴 Stopped"
+        st.metric("Agent Status", status_text)
+    
+    # Decisions per Hour
+    with col2:
+        decisions_per_hour = prom_query_value("rate(agent_decisions_total[5m]) * 3600")
+        st.metric("Decisions/Hour", f"{int(decisions_per_hour)}")
+    
+    # Average Confidence
+    with col3:
+        avg_confidence = prom_query_value("avg(agent_consensus_confidence_avg)")
+        st.metric("Avg Confidence", f"{avg_confidence:.1f}%")
+    
+    # Agent Drawdown
+    with col4:
+        drawdown = prom_query_value("agent_drawdown_pct")
+        st.metric("Agent Drawdown", f"{drawdown:.2f}%")
+    
+    # ========== DECISION CONFIDENCE METRICS ==========
+    st.markdown('<div class="section-header">📊 Análise de Confiança das Decisões</div>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    # High Confidence Decisions
+    with col1:
+        high_conf = prom_query_value("count(decision_confidence > 80)")
+        st.metric("High Confidence (>80%)", f"{int(high_conf)}")
+    
+    # Low Confidence Decisions
+    with col2:
+        low_conf = prom_query_value("count(decision_confidence < 50)")
+        st.metric("Low Confidence (<50%)", f"{int(low_conf)}")
+    
+    # Decision Confidence by Strategy
+    st.markdown("**Confiança por Estratégia**")
+    conf_strategy_series = prom_query_series("avg by (strategy) (decision_confidence)")
+    if conf_strategy_series:
+        strategy_data = {item["metric"].get("strategy", "unknown"): float(item["value"][1]) for item in conf_strategy_series}
+        if strategy_data:
+            st.bar_chart(strategy_data)
+        else:
+            st.info("No strategy confidence data")
+    else:
+        st.info("No data available")
+    
+    # ========== IA HEALTH METRICS ==========
+    st.markdown('<div class="section-header">💚 Saúde das IAs</div>', unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns(3)
+    
+    # IA Latency
+    with col1:
+        ia_latency = prom_query_value("ia_latency_ms")
+        st.metric("IA Latency", f"{ia_latency:.2f} ms")
+    
+    # IA Uptime
+    with col2:
+        ia_uptime = prom_query_value("ia_uptime_pct")
+        st.metric("IA Uptime", f"{ia_uptime:.1f}%")
+    
+    # IA Errors
+    with col3:
+        ia_errors = prom_query_value("increase(ia_errors_total[5m])")
+        st.metric("IA Errors (5m)", f"{int(ia_errors)}")
+    
+    # ========== ARBITRAGE INSIGHTS ==========
+    st.markdown('<div class="section-header">💱 Insights de Arbitragem</div>', unsafe_allow_html=True)
+    
+    # Failed Legs by Reason
+    st.markdown("**Falhas de Arbitragem por Motivo**")
+    failed_legs_series = prom_query_series("increase(arb_legs_fail_total[1h])")
+    if failed_legs_series:
+        failed_data = {}
+        for item in failed_legs_series:
+            reason = item["metric"].get("reason", "unknown")
+            value = float(item["value"][1])
+            failed_data[reason] = value
+        
+        if failed_data:
+            st.bar_chart(failed_data)
+        else:
+            st.info("No failed legs in last hour")
+    else:
+        st.info("No data available")
+    
+    # ========== CONSENSUS PHASE TIMELINE ==========
+    st.markdown('<div class="section-header">⏱️ Timeline de Consenso</div>', unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns(3)
+    
+    # Propose Phase
+    with col1:
+        propose_rate = prom_query_value("rate(agent_dialog_messages_total{phase=\"propose\"}[5m]) * 60")
+        st.metric("Propose (msg/min)", f"{propose_rate:.2f}")
+    
+    # Challenge Phase
+    with col2:
+        challenge_rate = prom_query_value("rate(agent_dialog_messages_total{phase=\"challenge\"}[5m]) * 60")
+        st.metric("Challenge (msg/min)", f"{challenge_rate:.2f}")
+    
+    # Decide Phase
+    with col3:
+        decide_rate = prom_query_value("rate(agent_dialog_messages_total{phase=\"decide\"}[5m]) * 60")
+        st.metric("Decide (msg/min)", f"{decide_rate:.2f}")
+
+def render_auditoria_tab():
+    """📋 Auditoria - Auditoria do Sistema"""
+    st.markdown("<div class=\"section-header\">📋 Auditoria do Sistema</div>", unsafe_allow_html=True)
+    
+    if not api_client.is_api_available():
+        st.error("🚨 API INDISPONÍVEL - Sistema não pode ser monitorado")
+        return
+
+    st.markdown("### 📜 Logs de Auditoria")
+
+    # Filtros
+    col1, col2 = st.columns(2)
+    with col1:
+        filter_user = st.text_input("Filtrar por Usuário (ID)", key="audit_user_filter")
+    with col2:
+        filter_action = st.text_input("Filtrar por Tipo de Ação", key="audit_action_filter")
+
+    # Buscar logs de auditoria
+    params = {"limit": 100}
+    if filter_user:
+        params["user_id"] = filter_user
+    if filter_action:
+        params["action_type"] = filter_action
+
+    audit_logs_data = api_client.get("/v1/audits", params=params)
+    audit_logs = safe_get(audit_logs_data, "audit_logs", [])
+
+    if audit_logs:
+        df = pd.DataFrame(audit_logs)
+        df["timestamp"] = pd.to_datetime(df["timestamp"]).dt.strftime("%Y-%m-%d %H:%M:%S")
+        st.dataframe(df[["timestamp", "user_id", "action_type", "details"]], use_container_width=True)
+    else:
+        st.info("Nenhum log de auditoria encontrado com os filtros selecionados.")
+    render_grafana_panel("slots_timeline", panel_id=2, height=350, title="Eventos do Sistema")
+
+def render_logs_tab():
+    """📝 Logs - Logs Reais do Sistema"""
+    st.markdown('<div class="section-header">📝 Logs do Sistema</div>', unsafe_allow_html=True)
+    
+    if not api_client.is_api_available():
+        st.error("🚨 API INDISPONÍVEL - Sistema não pode ser monitorado")
+        return
+    
+    # Filtros de logs
+    col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
+    
+    with col1:
+        nivel = st.selectbox(
+            "Nível",
+            ["Todos", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        )
+    
+    with col2:
+        modulo = st.selectbox(
+            "Módulo",
+            ["Todos", "core", "trading", "ia", "risk", "orchestration"]
+        )
+    
+    with col3:
+        limite = st.selectbox(
+            "Limite",
+            [50, 100, 200, 500]
+        )
+    
+    with col4:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🔄 Atualizar"):
+            st.rerun()
+    
+    # ========== LOGS REAIS VIA API ==========
+    logs_data = api_client.get_logs(
+        source=modulo if modulo != "Todos" else None,
+        level=nivel if nivel != "Todos" else None,
+        limit=limite
+    )
+    
+    logs = safe_get(logs_data, "logs", [])
+    
+    if not logs:
+        st.info("📝 Nenhum log disponível com os filtros selecionados")
+        return
+    
+    # KPIs dos logs
+    col1, col2, col3, col4 = st.columns(4)
+    
+    total_logs = len(logs)
+    error_logs = len([log for log in logs if safe_get(log, "level") == "ERROR"])
+    warning_logs = len([log for log in logs if safe_get(log, "level") == "WARNING"])
+    recent_logs = len([log for log in logs if "timestamp" in log])  # Logs com timestamp
+    
+    with col1:
+        st.metric("Total de Logs", total_logs)
+    
+    with col2:
+        st.metric("Errors", error_logs)
+    
+    with col3:
+        st.metric("Warnings", warning_logs)
+    
+    with col4:
+        st.metric("Recentes", recent_logs)
+    
+    # Renderiza logs reais
+    st.markdown("### 📋 Logs do Sistema")
+    
+    for log in logs:
+        timestamp = safe_get(log, "timestamp", "N/A")
+        level = safe_get(log, "level", "INFO")
+        module = safe_get(log, "module", safe_get(log, "source", "unknown"))
+        message = safe_get(log, "message", "")
+        
+        # Determina cor baseada no nível
+        color_map = {
+            "DEBUG": "var(--muted)",
+            "INFO": "var(--blue)", 
+            "WARNING": "var(--accent)",
+            "ERROR": "var(--red)",
+            "CRITICAL": "var(--red)"
+        }
+        color = color_map.get(level, "var(--text)")
+        
+        st.markdown(f"""
+        <div style="padding: 0.5rem; border-left: 3px solid {color}; margin: 0.25rem 0; background: var(--panel);">
+            <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
+                <span style="color: var(--text-secondary);">{timestamp}</span>
+                <span style="color: {color}; font-weight: bold;">{level}</span>
+                <span style="color: var(--muted);">[{module}]</span>
+            </div>
+            <div style="color: var(--text); margin-top: 0.25rem;">{message}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Controles
+    st.markdown("---")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🔄 Atualizar Logs", use_container_width=True):
+            st.rerun()
+    
+    with col2:
+        if st.button("📥 Exportar Logs", use_container_width=True):
+            st.info("Funcionalidade de exportação em desenvolvimento")
+    
+    # ========== PAINÉIS MAPEADOS DO GRAFANA (MÉTRICAS DE LOGS/ERROS) ==========
+    st.markdown('<div class="section-header">🚨 Erros de Conexão</div>', unsafe_allow_html=True)
+    
+    # Connection Errors
+    connection_errors = prom_query_value("increase(exchange_errors_total[5m])")
+    st.metric("Connection Errors (5m)", f"{int(connection_errors)}")
+    
+    # Connection Errors by Exchange
+    st.markdown("**Erros por Exchange**")
+    error_series = prom_query_series("increase(exchange_errors_total[5m])")
+    if error_series:
+        error_data = {}
+        for item in error_series:
+            exchange = item["metric"].get("exchange", "unknown")
+            value = float(item["value"][1])
+            error_data[exchange] = value
+        
+        if error_data:
+            st.bar_chart(error_data)
+        else:
+            st.info("No errors in last 5 minutes")
+    else:
+        st.info("No data available")
+
+def render_alertas_tab():
+    """🔔 Alertas - Notificações do Sistema"""
+    st.markdown('<div class="section-header">🔔 Alertas do Sistema</div>', unsafe_allow_html=True)
+    
+    if not api_client.is_api_available():
+        st.error("🚨 API INDISPONÍVEL - Sistema não pode ser monitorado")
+        return
+
+    # Filtros
+    col1, col2 = st.columns(2)
+    with col1:
+        filter_status = st.selectbox("Status", ["Todos", "active", "acknowledged"], key="alert_status_filter")
+    with col2:
+        filter_severity = st.selectbox("Severidade", ["Todos", "critical", "high", "medium", "low"], key="alert_severity_filter")
+
+    # Buscar alertas
+    params = {"limit": 100}
+    if filter_status != "Todos":
+        params["status"] = filter_status
+    if filter_severity != "Todos":
+        params["severity"] = filter_severity
+
+    alerts_data = api_client.get("/v1/alerts", params=params)
+    alerts = safe_get(alerts_data, "alerts", [])
+
+    if alerts:
+        for alert in alerts:
+            alert_id = alert.get("id")
+            severity = alert.get("severity", "low").upper()
+            message = alert.get("message", "Alerta sem descrição.")
+            timestamp = alert.get("timestamp", "")
+            status = alert.get("status", "active")
+
+            if severity == "CRITICAL":
+                st.error(f"**[{severity}]** {message} ({timestamp})")
+            elif severity == "HIGH":
+                st.warning(f"**[{severity}]** {message} ({timestamp})")
+            else:
+                st.info(f"**[{severity}]** {message} ({timestamp})")
+
+            if status == "active":
+                col_ack, col_del = st.columns([1, 5])
+                with col_ack:
+                    if st.button("Reconhecer", key=f"ack_{alert_id}"):
+                        response = api_client.post(f"/v1/alerts/{alert_id}/acknowledge")
+                        if safe_get(response, "status") == "ok":
+                            st.success(f"Alerta {alert_id} reconhecido.")
+                            st.rerun()
+                        else:
+                            st.error(f"Erro ao reconhecer alerta: {safe_get(response, 'message', 'Erro desconhecido')}")
+                with col_del:
+                    if st.button("Deletar", key=f"del_{alert_id}"):
+                        response = api_client.delete(f"/v1/alerts/{alert_id}")
+                        if safe_get(response, "status") == "ok":
+                            st.success(f"Alerta {alert_id} deletado.")
+                            st.rerun()
+                        else:
+                            st.error(f"Erro ao deletar alerta: {safe_get(response, 'message', 'Erro desconhecido')}")
+    else:
+        st.info("Nenhum alerta encontrado com os filtros selecionados.")
+    
+    with col2:
+        render_grafana_panel("venue_health", panel_id=2, height=300, title="Alertas das Exchanges")
+
+def render_backtests_tab():
+    """🔬 Backtests - Backtests do Sistema"""
+    st.markdown('<div class="section-header">🔬 Backtests Executados</div>', unsafe_allow_html=True)
+    
+    if not api_client.is_api_available():
+        st.error("🚨 API INDISPONÍVEL - Sistema não pode ser monitorado")
+        return
+    
+    # Informação sobre backtests
+    st.info("📊 **Backtests**: Use a API REST para executar backtests e visualizar resultados históricos")
+    
+    # Dashboard de performance histórica
+    st.markdown("### 📈 Performance Histórica")
+    render_grafana_panel("agents", panel_id=2, height=400, title="Performance dos Agentes ao Longo do Tempo")
+    
+    # ========== PAINÉIS MAPEADOS DO GRAFANA (EQUITY DAS EXCHANGES) ==========
+    st.markdown('<div class="section-header">💰 Equity das Exchanges</div>', unsafe_allow_html=True)
+    
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    # Binance Equity
+    with col1:
+        binance_equity = prom_query_value("binance_equity_usdt")
+        st.metric("Binance (USDT)", f"${binance_equity:,.2f}")
+    
+    # Bybit Equity
+    with col2:
+        bybit_equity = prom_query_value("bybit_equity_usdt")
+        st.metric("Bybit (USDT)", f"${bybit_equity:,.2f}")
+    
+    # Coinbase Equity
+    with col3:
+        coinbase_equity = prom_query_value("coinbase_equity_usdt")
+        st.metric("Coinbase (USDT)", f"${coinbase_equity:,.2f}")
+    
+    # KuCoin Equity
+    with col4:
+        kucoin_equity = prom_query_value("kucoin_equity_usdt")
+        st.metric("KuCoin (USDT)", f"${kucoin_equity:,.2f}")
+    
+    # OKX Equity
+    with col5:
+        okx_equity = prom_query_value("okx_equity_usdt")
+        st.metric("OKX (USDT)", f"${okx_equity:,.2f}")
+    
+    # ========== CARTEIRA REAL ==========
+    st.markdown('<div class="section-header">💵 Carteira Real</div>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    # Carteira USDT
+    with col1:
+        wallet_usdt = prom_query_value("sum(binance_equity_usdt)")
+        st.metric("Carteira Real (USDT)", f"${wallet_usdt:,.2f}")
+    
+    # Carteira BRL
+    with col2:
+        wallet_brl = prom_query_value("sum(binance_equity_brl)")
+        st.metric("Carteira Real (BRL)", f"R${wallet_brl:,.2f}")
+    
+    # KuCoin Equity Over Time (histórico)
+    st.markdown("**Evolução do Equity (KuCoin)**")
+    st.info("📊 Use Grafana para visualizar gráficos históricos de equity")
+
+def render_estrategias_tab():
+    """🎯 Estratégias - Catálogo Completo de Estratégias"""
+    st.markdown('<div class="section-header">🎯 Catálogo de Estratégias</div>', unsafe_allow_html=True)
+    
+    if not api_client.is_api_available():
+        st.error("🚨 API INDISPONÍVEL - Sistema não pode ser monitorado")
+        return
+    
+    # ========== CARREGA CATÁLOGO DE ESTRATÉGIAS ==========
+    try:
+        if hasattr(api_client, 'list_strategies'):
+            strategies = api_client.list_strategies()
+        else:
+            st.warning("⚠️ Endpoint de estratégias não disponível")
+            return
+    except Exception as e:
+        st.error(f"❌ Erro ao carregar estratégias: {e}")
+        return
+    
+    if not strategies:
+        st.info("📋 Nenhuma estratégia disponível no catálogo")
+        return
+    
+    # ========== MÉTRICAS GERAIS ==========
+    col1, col2, col3, col4 = st.columns(4)
+    
+    # Agrupa por tipo
+    strategy_groups = {}
+    for strategy in strategies:
+        group = strategy.get("group", "outros")
+        if group not in strategy_groups:
+            strategy_groups[group] = []
+        strategy_groups[group].append(strategy)
+    
+    with col1:
+        st.metric("Total de Estratégias", len(strategies))
+    
+    with col2:
+        st.metric("Grupos Disponíveis", len(strategy_groups))
+    
+    with col3:
+        high_freq = len([s for s in strategies if s.get("granularity") in ["1m", "5m"]])
+        st.metric("Alta Frequência", high_freq)
+    
+    with col4:
+        low_risk = len([s for s in strategies if s.get("risk_level") == "low"])
+        st.metric("Baixo Risco", low_risk)
+    
+    # ========== FILTROS ==========
+    st.markdown("### 🔍 Filtros")
+    col_group, col_risk, col_search = st.columns([2, 2, 3])
+    
+    with col_group:
+        group_filter = st.selectbox(
+            "Filtrar por Grupo",
+            ["Todos"] + list(strategy_groups.keys())
+        )
+    
+    with col_risk:
+        risk_filter = st.selectbox(
+            "Filtrar por Risco",
+            ["Todos", "low", "medium", "high"]
+        )
+    
+    with col_search:
+        search_term = st.text_input("Buscar estratégia", placeholder="Digite o nome...")
+    
+    # ========== LISTA DE ESTRATÉGIAS ==========
+    st.markdown("### 📋 Estratégias Disponíveis")
+    
+    # Aplica filtros
+    filtered_strategies = strategies
+    
+    if group_filter != "Todos":
+        filtered_strategies = [s for s in filtered_strategies if s.get("group") == group_filter]
+    
+    if risk_filter != "Todos":
+        filtered_strategies = [s for s in filtered_strategies if s.get("risk_level") == risk_filter]
+    
+    if search_term:
+        filtered_strategies = [s for s in filtered_strategies 
+                             if search_term.lower() in s.get("name", "").lower() or 
+                                search_term.lower() in s.get("description", "").lower()]
+    
+    # Ordena por nome
+    filtered_strategies.sort(key=lambda x: x.get("name", ""))
+    
+    if not filtered_strategies:
+        st.info("🔍 Nenhuma estratégia encontrada com os filtros aplicados")
+        return
+    
+    # Renderiza estratégias
+    for strategy in filtered_strategies:
+        strategy_id = strategy.get("id", "unknown")
+        name = strategy.get("name", strategy_id)
+        description = strategy.get("description", "Sem descrição")
+        group = strategy.get("group", "outros")
+        risk_level = strategy.get("risk_level", "medium")
+        granularity = strategy.get("granularity", "N/A")
+        min_notional = strategy.get("min_notional", 0)
+        markets = strategy.get("markets", [])
+        performance_target = strategy.get("performance_target", {})
+        
+        # Cores por risco
+        risk_colors = {
+            "low": "#22c55e",
+            "medium": "#f59e0b", 
+            "high": "#ef4444"
+        }
+        risk_color = risk_colors.get(risk_level, "#6b7280")
+        
+        # Cores por grupo
+        group_colors = {
+            "short-term": "#ff6b35",
+            "trend": "#4ecdc4",
+            "counter-trend": "#45b7d1",
+            "market-neutral": "#a29bfe",
+            "range": "#fd79a8",
+            "ai": "#e17055",
+            "volatility": "#d63031",
+            "funding": "#00b894",
+            "microstructure": "#e84393",
+            "event": "#fd79a8",
+            "intraday": "#fdcb6e"
+        }
+        group_color = group_colors.get(group, "#74b9ff")
+        
+        # Card da estratégia
+        with st.expander(f"**{name}** ({strategy_id})", expanded=False):
+            col_info, col_details = st.columns([2, 1])
+            
+            with col_info:
+                st.markdown(f"**Descrição:** {description}")
+                
+                # Tags
+                st.markdown(f"""
+                <div style="margin: 0.5rem 0;">
+                    <span style="background: {group_color}; color: white; padding: 2px 8px; 
+                                 border-radius: 12px; font-size: 0.8rem; margin-right: 0.5rem;">
+                        {group.replace('-', ' ').title()}
+                    </span>
+                    <span style="background: {risk_color}; color: white; padding: 2px 8px; 
+                                 border-radius: 12px; font-size: 0.8rem;">
+                        Risco: {risk_level.title()}
+                    </span>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Mercados suportados
+                if markets:
+                    st.markdown(f"**Mercados:** {', '.join(markets)}")
+                
+                # Performance target
+                if performance_target:
+                    st.markdown("**Performance Esperada:**")
+                    for key, value in performance_target.items():
+                        st.markdown(f"- {key.replace('_', ' ').title()}: {value}")
+            
+            with col_details:
+                st.markdown("**Parâmetros Técnicos:**")
+                st.markdown(f"- **Granularidade:** {granularity}")
+                st.markdown(f"- **Notional Mínimo:** ${min_notional:,}")
+                
+                min_data = strategy.get("min_data", "N/A")
+                if min_data != "N/A":
+                    st.markdown(f"- **Dados Mínimos:** {min_data}")
+    
+    # ========== ESTATÍSTICAS POR GRUPO ==========
+    if len(strategy_groups) > 1:
+        st.markdown("---")
+        st.markdown("### 📊 Distribuição por Grupo")
+        
+        # Gráfico simples de distribuição
+        group_counts = {group: len(strategies_list) for group, strategies_list in strategy_groups.items()}
+        
+        for group, count in sorted(group_counts.items(), key=lambda x: x[1], reverse=True):
+            group_color = group_colors.get(group, "#74b9ff")
+            percentage = (count / len(strategies)) * 100
+            
+            st.markdown(f"""
+            <div style="margin: 0.5rem 0; display: flex; align-items: center;">
+                <div style="width: 100px; font-size: 0.9rem; color: var(--text);">
+                    {group.replace('-', ' ').title()}:
+                </div>
+                <div style="flex: 1; background: var(--panel); border-radius: 4px; margin: 0 0.5rem; height: 20px; position: relative;">
+                    <div style="background: {group_color}; height: 100%; border-radius: 4px; width: {percentage}%;"></div>
+                </div>
+                <div style="width: 60px; text-align: right; font-size: 0.9rem; color: var(--text);">
+                    {count} ({percentage:.1f}%)
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+def render_orquestracao_tab():
+    """🎼 Orquestração - Layout Oficial G1|Centro(Líder+Slots)|G2|Footer"""
+    st.markdown('<div class="section-header">🎼 Estado da Orquestração</div>', unsafe_allow_html=True)
+    
+    if not api_client.is_api_available():
+        st.error("🚨 API INDISPONÍVEL - Sistema não pode ser monitorado")
+        return
+    
+    # ========== CARREGA DADOS REAIS ==========
+    state = _cached_orchestration_state()
+    ias = _cached_ia_health()
+    slots = _cached_slots()
+    
+    # Complementa slots do state se necessário
+    state_slots = safe_get(state, "slots", [])
+    if not slots and state_slots:
+        slots = state_slots
+    elif slots and state_slots:
+        # Combina dados se ambos existem
+        for state_slot in state_slots:
+            state_slot_id = safe_get(state_slot, "id")
+            if state_slot_id and not any(safe_get(s, "id") == state_slot_id for s in slots):
+                slots.append(state_slot)
+    
+    # ========== DETERMINA LÍDER ==========
+    leader_id = safe_get(state, "leader_id")
+    if not leader_id:
+        leader_id = safe_get(state, "orchestrator", {}).get("leader_id")
+    
+    # Se não tiver líder definido, escolhe primeira IA GREEN
+    leader_ia = None
+    if leader_id:
+        leader_ia = next((ia for ia in ias if safe_get(ia, "id") == leader_id), None)
+    
+    if not leader_ia:
+        # Fallback: primeira IA GREEN
+        leader_ia = next((ia for ia in ias if safe_get(ia, "status") == "GREEN"), None)
+        if not leader_ia and ias:
+            # Fallback final: primeira IA disponível
+            leader_ia = ias[0]
+    
+    # ========== DISTRIBUI IAs PARA G1 e G2 ==========
+    available_ias = [ia for ia in ias if ia != leader_ia] if leader_ia else ias[:]
+    
+    g1_ias = available_ias[:3]  # Primeiras 3
+    g2_ias = available_ias[3:6]  # Próximas 3
+    
+    # ========== SEPARA SLOTS ÍMPARES E PARES ==========
+    odd_slots = [slot for slot in slots if _is_odd_slot(safe_get(slot, "id", ""))]
+    even_slots = [slot for slot in slots if not _is_odd_slot(safe_get(slot, "id", ""))]
+    
+    # ========== LAYOUT PRINCIPAL: G1 | CENTRO | G2 ==========
+    col_g1, col_centro, col_g2 = st.columns([2, 4, 2])
+    
+    # ===== COLUNA G1 (ESQUERDA) =====
+    with col_g1:
+        st.markdown("**🤖 Grupo G1**")
+        
+        if g1_ias:
+            for i, ia in enumerate(g1_ias):
+                ia_id = safe_get(ia, "id", "N/A")
+                ia_name = safe_get(ia, "name", ia_id.split("_")[-1] if "_" in ia_id else ia_id)
+                ia_status = safe_get(ia, "status", "RED")
+                semaforo = map_ia_status(ia_status)
+                avatar_html = render_avatar_with_fallback(i + 1, 50)
+                
+                st.markdown(f"""
+                <div class="metric-card" style="text-align: center; padding: 0.5rem;">
+                    {avatar_html}
+                    <div style="margin-top: 0.5rem;">
+                        <div style="font-size: 0.9rem; font-weight: bold; color: var(--text);">{ia_name}</div>
+                        <div style="font-size: 1.2rem;">{semaforo}</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Controles de agente
+                col_btn1, col_btn2, col_mode = st.columns([1, 1, 2])
+                with col_btn1:
+                    if ia_status == "RED": # Assumindo RED = stopped
+                        if st.button("▶️ Start", key=f"start_g1_{ia_id}", use_container_width=True):
+                            response = api_client.post(f"/v1/orchestration/agents/{ia_id}/start")
+                            if safe_get(response, "success"):
+                                st.success(f"Agente {ia_name} iniciado.")
+                            else:
+                                st.error(f"Erro ao iniciar {ia_name}: {safe_get(response, 'message', 'Erro desconhecido')}")
+                            st.rerun()
+                    else:
+                        if st.button("⏹️ Stop", key=f"stop_g1_{ia_id}", use_container_width=True):
+                            response = api_client.post(f"/v1/orchestration/agents/{ia_id}/stop")
+                            if safe_get(response, "success"):
+                                st.info(f"Agente {ia_name} parado.")
+                            else:
+                                st.error(f"Erro ao parar {ia_name}: {safe_get(response, 'message', 'Erro desconhecido')}")
+                            st.rerun()
+                with col_mode:
+                    current_agent_mode = safe_get(ia, "mode", "auto")
+                    mode_options = ["auto", "manual", "standby"]
+                    selected_mode = st.selectbox(
+                        "Modo",
+                        mode_options,
+                        index=mode_options.index(current_agent_mode) if current_agent_mode in mode_options else 0,
+                        key=f"mode_g1_{ia_id}"
+                    )
+                    if selected_mode != current_agent_mode:
+                        response = api_client.post(f"/v1/orchestration/agents/{ia_id}/mode", json={"mode": selected_mode})
+                        if safe_get(response, "success"):
+                            st.success(f"Modo de {ia_name} alterado para {selected_mode}.")
+                        else:
+                            st.error(f"Erro ao alterar modo de {ia_name}: {safe_get(response, 'message', 'Erro desconhecido')}")
+                        st.rerun()
+        else:
+            st.info("🤖 Sem IAs G1 disponíveis")
+    
+    # ===== COLUNA CENTRO (LÍDER + SLOTS) =====
+    with col_centro:
+        # === LÍDER ===
+        st.markdown("**👑 Líder da Orquestração**")
+        
+        if leader_ia:
+            leader_name = safe_get(leader_ia, "name", safe_get(leader_ia, "id", "Líder").split("_")[-1])
+            leader_status = safe_get(leader_ia, "status", "RED")
+            leader_semaforo = map_ia_status(leader_status)
+            leader_avatar_html = render_avatar_with_fallback(4, 60)  # avatar4.png para líder
+            
+            st.markdown(f"""
+            <div class="metric-card-success" style="text-align: center; padding: 1rem; margin-bottom: 1rem;">
+                {leader_avatar_html}
+                <div style="margin-top: 0.5rem;">
+                    <div style="font-size: 1.1rem; font-weight: bold; color: var(--text);">{leader_name}</div>
+                    <div style="font-size: 1.5rem;">{leader_semaforo}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div class="metric-card-warning" style="text-align: center; padding: 1rem; margin-bottom: 1rem;">
+                {render_avatar_with_fallback(4, 60)}
+                <div style="margin-top: 0.5rem;">
+                    <div style="font-size: 1.1rem; font-weight: bold; color: var(--text);">Sem Líder</div>
+                    <div style="font-size: 1.5rem;">🔴</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # === SLOTS ÍMPARES E PARES ===
+        st.markdown("**🎰 Slots de Trading**")
+        
+        col_impares, col_pares = st.columns(2)
+        
+        with col_impares:
+            st.markdown("*Ímpares*")
+            if odd_slots:
+                for slot in odd_slots:
+                    slot_id = safe_get(slot, "id", "N/A")
+                    slot_status = safe_get(slot, "status", "UNKNOWN")
+                    strategy_name = safe_get(slot, "strategy") or safe_get(slot, "current_strategy") or safe_get(slot, "strategy_code") or "N/A"
+                    status_icon = map_slot_status(slot_status)
+                    
+                    st.markdown(f"""
+                    <div style="padding: 0.3rem; margin: 0.2rem 0; background: var(--panel); border-radius: 6px; border-left: 3px solid var(--border);">
+                        {status_icon} <strong>{strategy_name}</strong>
+                        <br><small style="color: var(--muted);">Slot: {slot_id}</small>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.info("Sem slots ímpares")
+        
+        with col_pares:
+            st.markdown("*Pares*")
+            if even_slots:
+                for slot in even_slots:
+                    slot_id = safe_get(slot, "id", "N/A")
+                    slot_status = safe_get(slot, "status", "UNKNOWN")
+                    strategy_name = safe_get(slot, "strategy") or safe_get(slot, "current_strategy") or safe_get(slot, "strategy_code") or "N/A"
+                    status_icon = map_slot_status(slot_status)
+                    
+                    st.markdown(f"""
+                    <div style="padding: 0.3rem; margin: 0.2rem 0; background: var(--panel); border-radius: 6px; border-left: 3px solid var(--border);">
+                        {status_icon} <strong>{strategy_name}</strong>
+                        <br><small style="color: var(--muted);">Slot: {slot_id}</small>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.info("Sem slots pares")
+    
+    # ===== COLUNA G2 (DIREITA) =====
+    with col_g2:
+        st.markdown("**🤖 Grupo G2**")
+        
+        if g2_ias:
+            for i, ia in enumerate(g2_ias):
+                ia_id = safe_get(ia, "id", "N/A")
+                ia_name = safe_get(ia, "name", ia_id.split("_")[-1] if "_" in ia_id else ia_id)
+                ia_status = safe_get(ia, "status", "RED")
+                semaforo = map_ia_status(ia_status)
+                avatar_html = render_avatar_with_fallback(i + 5, 50)  # avatar5, avatar6, avatar7
+                
+                st.markdown(f"""
+                <div class="metric-card" style="text-align: center; padding: 0.5rem;">
+                    {avatar_html}
+                    <div style="margin-top: 0.5rem;">
+                        <div style="font-size: 0.9rem; font-weight: bold; color: var(--text);">{ia_name}</div>
+                        <div style="font-size: 1.2rem;">{semaforo}</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Controles de agente
+                col_btn1, col_btn2, col_mode = st.columns([1, 1, 2])
+                with col_btn1:
+                    if ia_status == "RED": # Assumindo RED = stopped
+                        if st.button("▶️ Start", key=f"start_g2_{ia_id}", use_container_width=True):
+                            response = api_client.post(f"/v1/orchestration/agents/{ia_id}/start")
+                            if safe_get(response, "success"):
+                                st.success(f"Agente {ia_name} iniciado.")
+                            else:
+                                st.error(f"Erro ao iniciar {ia_name}: {safe_get(response, 'message', 'Erro desconhecido')}")
+                            st.rerun()
+                    else:
+                        if st.button("⏹️ Stop", key=f"stop_g2_{ia_id}", use_container_width=True):
+                            response = api_client.post(f"/v1/orchestration/agents/{ia_id}/stop")
+                            if safe_get(response, "success"):
+                                st.info(f"Agente {ia_name} parado.")
+                            else:
+                                st.error(f"Erro ao parar {ia_name}: {safe_get(response, 'message', 'Erro desconhecido')}")
+                            st.rerun()
+                with col_mode:
+                    current_agent_mode = safe_get(ia, "mode", "auto")
+                    mode_options = ["auto", "manual", "standby"]
+                    selected_mode = st.selectbox(
+                        "Modo",
+                        mode_options,
+                        index=mode_options.index(current_agent_mode) if current_agent_mode in mode_options else 0,
+                        key=f"mode_g2_{ia_id}"
+                    )
+                    if selected_mode != current_agent_mode:
+                        response = api_client.post(f"/v1/orchestration/agents/{ia_id}/mode", json={"mode": selected_mode})
+                        if safe_get(response, "success"):
+                            st.success(f"Modo de {ia_name} alterado para {selected_mode}.")
+                        else:
+                            st.error(f"Erro ao alterar modo de {ia_name}: {safe_get(response, 'message', 'Erro desconhecido')}")
+                        st.rerun()
+        else:
+            st.info("🤖 Sem IAs G2 disponíveis")
+    
+    # ========== RODADAS DE CONSENSO ==========
+    st.markdown("---")
+    st.markdown("### 🎯 Rodadas de Consenso")
+    
+    # Busca rodadas recentes via API
+    try:
+        import requests
+        api_url = os.getenv("API_URL", "http://ai-gateway:8080/v1")
+        response = requests.get(f"{api_url}/orchestration/consensus/recent?limit=10", timeout=5)
+        
+        if response.status_code == 200:
+            data = response.json()
+            rounds = data.get("data", {}).get("rounds", [])
+            
+            if rounds:
+                for round_data in rounds[:5]:  # Mostrar últimas 5
+                    consensus_id = round_data.get("consensus_id", "N/A")
+                    symbol = round_data.get("symbol", ["N/A"])[0] if isinstance(round_data.get("symbol"), list) else round_data.get("symbol", "N/A")
+                    approved = round_data.get("approved", False)
+                    action = round_data.get("action", "hold")
+                    confidence = round_data.get("confidence_avg", 0)
+                    started_at = round_data.get("started_at", "N/A")
+                    
+                    status_icon = "✅" if approved else "❌"
+                    status_color = "var(--green)" if approved else "var(--red)"
+                    
+                    st.markdown(f"""
+                    <div style="padding: 0.75rem; margin: 0.5rem 0; background: var(--panel2); border-radius: 8px; border-left: 3px solid {status_color};">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <strong>{status_icon} {symbol}</strong> - {action.upper()}
+                                <br><small style="color: var(--muted);">Confiança: {confidence:.2%} | ID: {consensus_id[:8]}...</small>
+                            </div>
+                            <div style="text-align: right; font-size: 0.85rem; color: var(--muted);">
+                                {started_at[:19] if len(started_at) > 19 else started_at}
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.info("📊 Nenhuma rodada de consenso registrada ainda")
+        else:
+            st.warning("⚠️ Não foi possível carregar rodadas de consenso")
+    except Exception as e:
+        logger.warning(f"Erro ao buscar rodadas de consenso: {e}")
+        st.info("📊 Feed de consenso temporariamente indisponível")
+    
+    # ========== DIÁLOGO ENTRE AGENTES ==========
+    st.markdown("### 💬 Diálogo entre Agentes")
+    
+    # Busca últimos diálogos via API
+    try:
+        response = requests.get(f"{api_url}/orchestration/dialogs?limit=20", timeout=5)
+        
+        if response.status_code == 200:
+            data = response.json()
+            dialogs = data.get("data", {}).get("dialogs", [])
+            
+            if dialogs:
+                # Agrupa por consensus_id
+                consensus_dialogs = {}
+                for dialog in dialogs:
+                    cid = dialog.get("consensus_id", "unknown")
+                    if cid not in consensus_dialogs:
+                        consensus_dialogs[cid] = []
+                    consensus_dialogs[cid].append(dialog)
+                
+                # Mostra último consenso com diálogos
+                for cid, msgs in list(consensus_dialogs.items())[:3]:  # Últimos 3 consensos
+                    with st.expander(f"💬 Consenso: {cid[:8]}...", expanded=False):
+                        for msg in msgs[:5]:  # Primeiras 5 mensagens
+                            phase = msg.get("phase", "unknown")
+                            agent_id = msg.get("agent_id", "unknown")
+                            rationale = msg.get("rationale", "N/A")
+                            ts = msg.get("ts", "N/A")
+                            
+                            phase_icon = {"propose": "💡", "challenge": "🤔", "decide": "⚖️"}.get(phase, "📝")
+                            
+                            st.markdown(f"""
+                            <div style="padding: 0.5rem; margin: 0.25rem 0; background: var(--panel); border-radius: 6px;">
+                                <div style="font-size: 0.85rem;">
+                                    <strong>{phase_icon} {agent_id}</strong> ({phase})
+                                    <br><span style="color: var(--text-secondary);">{rationale[:150]}...</span>
+                                    <br><small style="color: var(--muted);">{ts[:19] if len(ts) > 19 else ts}</small>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+            else:
+                st.info("💬 Nenhum diálogo registrado ainda")
+        else:
+            st.warning("⚠️ Não foi possível carregar diálogos")
+    except Exception as e:
+        logger.warning(f"Erro ao buscar diálogos: {e}")
+        st.info("💬 Feed de diálogos temporariamente indisponível")
+    
+    # ========== DASHBOARD DO GRAFANA ==========
+    st.markdown("### 📊 Dashboard de Consenso")
+    
+    # Embed do Grafana consensus-flow
+    uid = get_dashboard_uid("consensus")
+    if uid:
+        render_full_dashboard("consensus", height=600, title="")
+    else:
+        st.info("📊 Dashboard de consenso não disponível")
+    
+    # ========== RODAPÉ: TABELA DUPLA (ÍMPAR | PAR) ==========
+    st.markdown("---")
+    st.markdown("### 📊 Resumo dos Slots")
+    
+    col_impares_footer, col_pares_footer = st.columns(2)
+    
+    with col_impares_footer:
+        st.markdown("**📈 Slots Ímpares**")
+        
+        if odd_slots:
+            for slot in odd_slots:
+                slot_id = safe_get(slot, "id", "N/A")
+                exchange = safe_get(slot, "exchange", "N/A")
+                strategy_name = safe_get(slot, "strategy") or safe_get(slot, "current_strategy") or safe_get(slot, "strategy_code") or "N/A"
+                allocation = safe_get(slot, "allocation") or safe_get(slot, "capital", 0)
+                pnl_value = safe_get(slot, "pnl", 0)
+                pnl_pct = safe_get(slot, "pnl_percentage", 0)
+                
+                # Última ordem
+                last_trade = safe_get(slot, "last_trade", {})
+                if last_trade:
+                    symbol = safe_get(last_trade, "symbol", "")
+                    side = safe_get(last_trade, "side", "")
+                    price = safe_get(last_trade, "price", 0)
+                    last_order_text = f"{side} {symbol} @ {fmt_money(price)}" if symbol and side else "—"
+                else:
+                    last_order_text = "—"
+                
+                status_icon = map_slot_status(safe_get(slot, "status", "UNKNOWN"))
+                
+                st.markdown(f"""
+                <div class="metric-card-neutral" style="padding: 0.75rem; margin-bottom: 0.5rem;">
+                    <div style="display: flex; align-items: center; margin-bottom: 0.25rem;">
+                        {status_icon} <strong style="margin-left: 0.5rem;">{slot_id}</strong>
+                        <span style="margin-left: auto; color: var(--muted); font-size: 0.85rem;">({exchange})</span>
+                    </div>
+                    <div style="background: var(--panel); padding: 0.25rem; border-radius: 4px; margin-bottom: 0.25rem;">
+                        <span style="font-size: 0.8rem; color: var(--accent);">{strategy_name}</span>
+                    </div>
+                    <div style="font-size: 0.85rem; color: var(--text-secondary);">
+                        <div>Alocação: {fmt_money(allocation, "$")}</div>
+                        <div>Última: {last_order_text}</div>
+                        <div>P&L: {fmt_money(pnl_value, "$")} ({fmt_pct(pnl_pct)})</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.info("📊 Nenhum slot ímpar configurado")
+    
+    with col_pares_footer:
+        st.markdown("**📈 Slots Pares**")
+        
+        if even_slots:
+            for slot in even_slots:
+                slot_id = safe_get(slot, "id", "N/A")
+                exchange = safe_get(slot, "exchange", "N/A")
+                strategy_name = safe_get(slot, "strategy") or safe_get(slot, "current_strategy") or safe_get(slot, "strategy_code") or "N/A"
+                allocation = safe_get(slot, "allocation") or safe_get(slot, "capital", 0)
+                pnl_value = safe_get(slot, "pnl", 0)
+                pnl_pct = safe_get(slot, "pnl_percentage", 0)
+                
+                # Última ordem
+                last_trade = safe_get(slot, "last_trade", {})
+                if last_trade:
+                    symbol = safe_get(last_trade, "symbol", "")
+                    side = safe_get(last_trade, "side", "")
+                    price = safe_get(last_trade, "price", 0)
+                    last_order_text = f"{side} {symbol} @ {fmt_money(price)}" if symbol and side else "—"
+                else:
+                    last_order_text = "—"
+                
+                status_icon = map_slot_status(safe_get(slot, "status", "UNKNOWN"))
+                
+                st.markdown(f"""
+                <div class="metric-card-neutral" style="padding: 0.75rem; margin-bottom: 0.5rem;">
+                    <div style="display: flex; align-items: center; margin-bottom: 0.25rem;">
+                        {status_icon} <strong style="margin-left: 0.5rem;">{slot_id}</strong>
+                        <span style="margin-left: auto; color: var(--muted); font-size: 0.85rem;">({exchange})</span>
+                    </div>
+                    <div style="background: var(--panel); padding: 0.25rem; border-radius: 4px; margin-bottom: 0.25rem;">
+                        <span style="font-size: 0.8rem; color: var(--accent);">{strategy_name}</span>
+                    </div>
+                    <div style="font-size: 0.85rem; color: var(--text-secondary);">
+                        <div>Alocação: {fmt_money(allocation, "$")}</div>
+                        <div>Última: {last_order_text}</div>
+                        <div>P&L: {fmt_money(pnl_value, "$")} ({fmt_pct(pnl_pct)})</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.info("📊 Nenhum slot par configurado")
+    
+    # ========== CONSENSUS FLOW DASHBOARD ==========
+    st.markdown("---")
+    st.markdown("### 🎯 Consensus Flow")
+    render_grafana_panel("consensus", panel_id=1, height=500, title="Fluxo de Consenso entre Agentes")
+    
+    # ========== PAINÉIS MAPEADOS DO GRAFANA (MÉTRICAS DE ORQUESTRAÇÃO) ==========
+    st.markdown('<div class="section-header">🎼 Métricas de Orquestração</div>', unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns(3)
+    
+    # Decision Latency (p50, p95)
+    with col1:
+        decision_latency_p50 = prom_query_value("histogram_quantile(0.50, sum(rate(agent_decision_latency_ms_bucket[5m])) by (le))")
+        st.metric("Decision Latency (p50)", f"{decision_latency_p50:.2f} ms")
+    
+    with col2:
+        decision_latency_p95 = prom_query_value("histogram_quantile(0.95, sum(rate(agent_decision_latency_ms_bucket[5m])) by (le))")
+        st.metric("Decision Latency (p95)", f"{decision_latency_p95:.2f} ms")
+    
+    # Arbitrage P&L
+    with col3:
+        arb_pnl = prom_query_value("arb_pnl_realized")
+        st.metric("Arbitrage P&L", f"${arb_pnl:,.2f}")
+    
+    # ========== DECISION TIMELINE ==========
+    st.markdown('<div class="section-header">⏱️ Timeline de Decisões</div>', unsafe_allow_html=True)
+    
+    st.markdown("**Decision Timeline (Propose/Challenge/Decide)**")
+    st.info("📊 Use Grafana para visualizar o timeline completo de decisões dos agentes")
+    
+    # Decision rates by action
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        propose_rate = prom_query_value("sum by(action) (rate(agent_decisions_total{action=\"propose\"}[5m])) * 60")
+        st.metric("Propose Rate (dec/min)", f"{propose_rate:.2f}")
+    
+    with col2:
+        challenge_rate = prom_query_value("sum by(action) (rate(agent_decisions_total{action=\"challenge\"}[5m])) * 60")
+        st.metric("Challenge Rate (dec/min)", f"{challenge_rate:.2f}")
+    
+    with col3:
+        decide_rate = prom_query_value("sum by(action) (rate(agent_decisions_total{action=\"decide\"}[5m])) * 60")
+        st.metric("Decide Rate (dec/min)", f"{decide_rate:.2f}")
+
+def render_carteira_tab():
+    """💰 Carteira - Gestão Real da Carteira"""
+    st.markdown('<div class="section-header">💰 Gestão de Carteira</div>', unsafe_allow_html=True)
+    
+    if not api_client.is_api_available():
+        st.error("🚨 API INDISPONÍVEL - Sistema não pode ser monitorado")
+        return
+    
+    # ========== DADOS REAIS DA CARTEIRA ==========
+    exchanges = _cached_exchange_health()
+    wallet_data = _cached_wallet_details()
+    state = _cached_orchestration_state()
+    
+    # Usa dados do state se wallet_data estiver vazio
+    if not wallet_data or not wallet_data.get("exchanges"):
+        wallet_info = safe_get(state, "wallet", {})
+        per_exchange_data = safe_get(wallet_info, "per_exchange", [])
+        
+        # Converte per_exchange para formato esperado
+        exchanges_info = {}
+        for ex_data in per_exchange_data:
+            ex_name = safe_get(ex_data, "exchange", "")
+            if ex_name:
+                exchanges_info[ex_name] = {
+                    "total_usd": safe_get(ex_data, "balance", 0)
+                }
+    else:
+        exchanges_info = safe_get(wallet_data, "exchanges", {})
+    
+    balances = safe_get(wallet_data, "balances", {})
+    
+    # Obtém cotação USD→BRL
+    usd_brl_rate = get_usd_to_brl_rate()
+    
+    # ========== RESUMO GERAL ==========
+    st.markdown("### 📊 Resumo da Carteira")
+    
+    # Calcula totais
+    total_usd = 0
+    connected_exchanges = 0
+    
+    for exchange_name in ["binance", "kucoin", "bybit", "coinbase", "okx"]:
+        exchange_data = next((ex for ex in exchanges if safe_get(ex, "id", "").lower() == exchange_name), None)
+        if exchange_data and safe_get(exchange_data, "status") == "GREEN":
+            connected_exchanges += 1
+            balance_info = safe_get(exchanges_info, exchange_name, {})
+            balance_usd = safe_get(balance_info, "total_usd", 0)
+            total_usd += balance_usd
+    
+    total_brl = convert_usd_to_brl(total_usd) if total_usd > 0 else None
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown(f"""
+        <div class="kpi-card">
+            <h3 style="margin:0; color: var(--text);">{connected_exchanges}/5</h3>
+            <p style="margin:0; color: var(--muted); font-size: 0.9rem;">Exchanges Conectadas</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown(f"""
+        <div class="kpi-card">
+            <h3 style="margin:0; color: var(--text);">{fmt_money(total_usd, '$')}</h3>
+            <p style="margin:0; color: var(--muted); font-size: 0.9rem;">Total USD</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        if total_brl:
+            st.markdown(f"""
+            <div class="kpi-card">
+                <h3 style="margin:0; color: var(--text);">{fmt_money(total_brl, 'R$')}</h3>
+                <p style="margin:0; color: var(--muted); font-size: 0.9rem;">Total BRL</p>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div class="kpi-card">
+                <h3 style="margin:0; color: var(--muted);">BRL: N/D</h3>
+                <p style="margin:0; color: var(--muted); font-size: 0.9rem;">Cotação indisponível</p>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    # ========== EXCHANGES INDIVIDUAIS ==========
+    st.markdown("### 🏦 Exchanges Suportadas")
+    
+    supported_exchanges = ["binance", "kucoin", "bybit", "coinbase", "okx"]
+    
+    for exchange_name in supported_exchanges:
+        # Verifica se exchange está conectada
+        exchange_data = next((ex for ex in exchanges if safe_get(ex, "id", "").lower() == exchange_name), None)
+        
+        # Busca saldo da carteira
+        balance_info = safe_get(exchanges_info, exchange_name, {})
+        balance_usd = safe_get(balance_info, "total_usd", 0)
+        balance_brl = convert_usd_to_brl(balance_usd) if balance_usd else None
+        
+        col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
+        
+        with col1:
+            if exchange_data and safe_get(exchange_data, "status") == "GREEN":
+                st.markdown(f"**{exchange_name.title()}** {format_state('GREEN')}", unsafe_allow_html=True)
+            elif exchange_data:
+                status = safe_get(exchange_data, "status", "RED")
+                st.markdown(f"**{exchange_name.title()}** {format_state(status)}", unsafe_allow_html=True)
+            else:
+                st.markdown(f"**{exchange_name.title()}** <span class='status-red'>🔴 NÃO CONFIGURADA</span>", unsafe_allow_html=True)
+        
+        with col2:
+            if exchange_data and safe_get(exchange_data, "status") == "GREEN":
+                st.write(f"USD: {fmt_money(balance_usd, '$')}")
+            else:
+                st.write("USD: carteira não configurada")
+        
+        with col3:
+            if balance_brl and exchange_data and safe_get(exchange_data, "status") == "GREEN":
+                st.write(f"BRL: {fmt_money(balance_brl, 'R$')}")
+            elif exchange_data and safe_get(exchange_data, "status") == "GREEN":
+                st.write("BRL: cotação indisponível")
+            else:
+                st.write("BRL: carteira não configurada")
+        
+        with col4:
+            if exchange_data and safe_get(exchange_data, "status") == "GREEN":
+                latency = safe_get(exchange_data, "latency_ms", 0)
+                if latency > 0:
+                    st.write(f"{latency:.0f}ms")
+                else:
+                    st.write("–")
+            else:
+                st.write("–")
+        
+        st.markdown("---")
+    
+    # ========== OBSERVAÇÕES ==========
+    if not usd_brl_rate:
+        st.info("💡 **Nota:** Conversão USD→BRL não disponível. Configure endpoint de cotação no Core para exibir valores em BRL.")
+
+# -------------------------
+# MAIN APPLICATION
+# -------------------------
+
+def main():
+    """Função principal da aplicação"""
+    
+    # Header Premium
+    st.markdown("""
+    <div class="main-header">
+        <div class="main-title">🤖 Maveretta Bot</div>
+        <div class="main-subtitle">AI Trading Orchestration System</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 13 abas fixas na ordem especificada
+    tabs = st.tabs([
+        "📊 Overview",
+        "📈 Operações", 
+        "🎰 Slots",
+        "🏦 Treasury",
+        "🎮 Controles",
+        "🧠 IA Insights",
+        "📋 Auditoria",
+        "📝 Logs",
+        "🚨 Alertas",
+        "🔬 Backtests",
+        "🎯 Estratégias",
+        "🎼 Orquestração",
+        "💰 Carteira"
+    ])
+    
+    # Renderização das abas
+    with tabs[0]:
+        render_overview_tab()
+    
+    with tabs[1]:
+        render_operacoes_tab()
+    
+    with tabs[2]:
+        render_slots_tab()
+    
+    with tabs[3]:
+        from treasury_tab import render_treasury_tab
+        render_treasury_tab()
+    
+    with tabs[4]:
+        render_controles_tab()
+    
+    with tabs[5]:
+        render_ia_insights_tab()
+    
+    with tabs[6]:
+        render_auditoria_tab()
+    
+    with tabs[7]:
+        render_logs_tab()
+    
+    with tabs[8]:
+        render_alertas_tab()
+    
+    with tabs[9]:
+        render_backtests_tab()
+    
+    with tabs[10]:
+        render_estrategias_tab()
+    
+    with tabs[11]:
+        # Usa aba de orquestração Phase 1
+        try:
+            from orchestration_tab_phase1 import render_orchestration_tab
+            render_orchestration_tab()
+        except ImportError:
+            # Fallback para aba antiga se nova não estiver disponível
+            st.warning("⚠️ Orchestration tab not available")
+            render_orquestracao_tab()
+    
+    with tabs[12]:
+        render_carteira_tab()
+
+if __name__ == "__main__":
+    main()
