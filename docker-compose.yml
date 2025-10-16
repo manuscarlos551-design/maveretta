@@ -1,0 +1,512 @@
+networks:
+  bot-network:
+    name: bot-network
+    driver: bridge
+
+volumes:
+  grafana-data:
+  prometheus-data:
+  mongodb-data:
+  redis-data:
+
+services:
+  # ========== BASE INFRASTRUCTURE (Tier 1 - No Dependencies) ==========
+  
+  mongodb:
+    image: mongo:6
+    restart: unless-stopped
+    volumes:
+      - mongodb-data:/data/db
+      - ./logs/mongodb:/var/log/mongodb
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok' | grep -q 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - bot-network
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    volumes:
+      - redis-data:/data
+      - ./logs/redis:/var/log/redis
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - bot-network
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.25.0
+    restart: unless-stopped
+    expose:
+      - "9115"
+    ports:
+      - "9115:9115"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9115/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    networks:
+      - bot-network
+
+  # ========== TIER 2: Prometheus (Independent) ==========
+  
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+      - --storage.tsdb.retention.time=30d
+      - --storage.tsdb.retention.size=10GB
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+      - ./logs/prometheus:/var/log/prometheus
+    expose:
+      - "9090"
+    ports:
+      - "9090:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/ready"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+      start_period: 10s
+    networks:
+      - bot-network
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    restart: unless-stopped
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./logs/alertmanager:/var/log/alertmanager
+    expose:
+      - "9093"
+    ports:
+      - "9093:9093"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9093/-/ready"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+      start_period: 10s
+    networks:
+      - bot-network
+
+  # ========== TIER 3: Grafana & AI Gateway ==========
+  
+  grafana:
+    image: grafana/grafana:11.1.0
+    restart: unless-stopped
+    environment:
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      - GF_SERVER_DOMAIN=localhost
+      - GF_SECURITY_ADMIN_USER=Maverick
+      - GF_SECURITY_ADMIN_PASSWORD=Xpd121157@
+      - GF_SECURITY_COOKIE_SAMESITE=disabled
+      - GF_SECURITY_COOKIE_SECURE=false
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_METRICS_ENABLED=true
+      - GF_SERVER_HTTP_ADDR=0.0.0.0
+      - GF_SERVER_HTTP_PORT=3000
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    expose:
+      - "3000"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health | grep -q '\"database\":\"ok\"' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+    networks:
+      - bot-network
+
+  ai-gateway:
+    image: bot-ai-gateway
+    build:
+      context: .
+      dockerfile: docker/ai-gateway.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - API_PORT=8080
+      - API_URL=http://ai-gateway:8080
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+      - TOGETHER_API_KEY=${TOGETHER_API_KEY:-}
+    expose:
+      - "8080"
+    ports:
+      - "8080:8080"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+      start_period: 10s
+    networks:
+      - bot-network
+
+  # ========== TIER 4: Exporters (Depend on Prometheus & DB) ==========
+  
+  mongodb-exporter:
+    image: percona/mongodb_exporter:0.40.0
+    restart: unless-stopped
+    environment:
+      - MONGODB_URI=${MONGO_URI}
+    command:
+      - --mongodb.uri=${MONGO_URI}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+    expose:
+      - "9216"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9216/metrics > /dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+      start_period: 40s
+    networks:
+      - bot-network
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    restart: unless-stopped
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+    expose:
+      - "9121"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9121/metrics > /dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+      start_period: 40s
+    networks:
+      - bot-network
+
+  binance-exporter:
+    image: bot-binance-exporter
+    build:
+      context: .
+      dockerfile: docker/binance-exporter.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - BINANCE_API_KEY=${BINANCE_API_KEY:-}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET:-}
+    expose:
+      - "8000"
+    ports:
+      - "8000:8000"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/health || exit 1"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+      start_period: 10s
+    networks:
+      - bot-network
+
+  kucoin-exporter:
+    image: bot-kucoin-exporter
+    build:
+      context: .
+      dockerfile: docker/kucoin-exporter.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - KUCOIN_KEY=${KUCOIN_KEY:-}
+      - KUCOIN_SECRET=${KUCOIN_SECRET:-}
+      - KUCOIN_API_KEY=${KUCOIN_API_KEY:-}
+      - KUCOIN_API_SECRET=${KUCOIN_API_SECRET:-}
+      - KUCOIN_API_PASSPHRASE=${KUCOIN_API_PASSPHRASE:-}
+    expose:
+      - "8001"
+    ports:
+      - "8001:8001"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8001/health || exit 1"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+      start_period: 10s
+    networks:
+      - bot-network
+
+  bybit-exporter:
+    image: bot-bybit-exporter
+    build:
+      context: .
+      dockerfile: docker/bybit-exporter.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - BYBIT_KEY=${BYBIT_KEY:-}
+      - BYBIT_SECRET=${BYBIT_SECRET:-}
+      - BYBIT_API_KEY=${BYBIT_API_KEY:-}
+      - BYBIT_API_SECRET=${BYBIT_API_SECRET:-}
+      - BYBIT_TESTNET=${BYBIT_TESTNET:-false}
+    expose:
+      - "8002"
+    ports:
+      - "8002:8002"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8002/health || exit 1"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+      start_period: 10s
+    networks:
+      - bot-network
+
+  coinbase-exporter:
+    image: bot-coinbase-exporter
+    build:
+      context: .
+      dockerfile: docker/coinbase-exporter.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - COINBASE_KEY=${COINBASE_KEY:-}
+      - COINBASE_SECRET=${COINBASE_SECRET:-}
+      - COINBASE_API_KEY=${COINBASE_API_KEY:-}
+      - COINBASE_PRIVATE_KEY_PEM=${COINBASE_PRIVATE_KEY_PEM:-}
+    expose:
+      - "8003"
+    ports:
+      - "8003:8003"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8003/health || exit 1"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+      start_period: 10s
+    networks:
+      - bot-network
+
+  okx-exporter:
+    image: bot-okx-exporter
+    build:
+      context: .
+      dockerfile: docker/okx-exporter.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - OKX_KEY=${OKX_KEY:-}
+      - OKX_SECRET=${OKX_SECRET:-}
+      - OKX_API_KEY=${OKX_API_KEY:-}
+      - OKX_API_SECRET=${OKX_API_SECRET:-}
+      - OKX_API_PASSPHRASE=${OKX_API_PASSPHRASE:-}
+      - OKX_SIMULATED=${OKX_SIMULATED:-false}
+    expose:
+      - "8004"
+    ports:
+      - "8004:8004"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8004/health || exit 1"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+      start_period: 10s
+    networks:
+      - bot-network
+
+  # ========== TIER 5: Bot Services (Depend on AI Gateway + DB) ==========
+  
+  bot-ai-multiagent:
+    image: bot-bot-ai-multiagent
+    build:
+      context: .
+      dockerfile: docker/bot-ai-multiagent.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - API_URL=http://ai-gateway:8080
+      - REDIS_HOST=redis
+      - MONGO_URI=mongodb://mongodb:27017
+    depends_on:
+      ai-gateway:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    expose:
+      - "9200"
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9200/health || exit 1"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+      start_period: 10s
+    networks:
+      - bot-network
+
+  core-daemon:
+    image: bot-core-daemon
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "core.cli", "autostart"]
+    env_file:
+      - .env
+    environment:
+      - AGENT_TICK_SECONDS=${AGENT_TICK_SECONDS:-3}
+      - KILL_SWITCH=${KILL_SWITCH:-false}
+      - CONSENSUS_TIMEOUT_SEC=${CONSENSUS_TIMEOUT_SEC:-30}
+      - LEARNING_ENABLED=${LEARNING_ENABLED:-false}
+      - LEARNING_FREQ_DECISIONS=${LEARNING_FREQ_DECISIONS:-50}
+      - LEARNING_MAX_DRIFT=${LEARNING_MAX_DRIFT:-0.1}
+      - DYNAMIC_RISK_ENABLED=${DYNAMIC_RISK_ENABLED:-true}
+      - MONGO_URI=${MONGO_URI}
+      - REDIS_HOST=${REDIS_HOST}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ai-gateway:
+        condition: service_healthy
+    expose:
+      - "9109"
+    ports:
+      - "9109:9109"
+    networks:
+      - bot-network
+
+  # ========== TIER 6: Dashboard (Depends on Multiple Services) ==========
+  
+  dashboard:
+    image: bot-dashboard
+    build:
+      context: .
+      dockerfile: docker/dashboard.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - API_URL=http://ai-gateway:8080
+      - STREAMLIT_SERVER_PORT=8501
+      - STREAMLIT_SERVER_HEADLESS=true
+    depends_on:
+      ai-gateway:
+        condition: service_healthy
+      grafana:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+    expose:
+      - "8501"
+    ports:
+      - "8501:8501"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8501/ || exit 1"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+      start_period: 15s
+    networks:
+      - bot-network
+
+  # ========== TIER 7: NGINX (Final Gateway - Depends on All Upstreams) ==========
+  
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    depends_on:
+      ai-gateway:
+        condition: service_healthy
+      dashboard:
+        condition: service_healthy
+      grafana:
+        condition: service_healthy
+    volumes:
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./logs/nginx:/var/log/nginx
+    ports:
+      - "80:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks:
+      - bot-network

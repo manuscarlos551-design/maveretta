@@ -1,0 +1,159 @@
+# Maveretta - TURBINADA Recording Rules
+# Versão: 2.0 - Otimização com agregações pré-computadas e TTL
+
+groups:
+  # ===== TURBINADA: KPIs de Alta Frequência (5s) =====
+  - name: maveretta_hot_kpis
+    interval: 5s
+    rules:
+      # PnL total em tempo real
+      - record: maveretta:realtime_pnl_usd
+        expr: sum(bot_slot_pnl_usd{status="active"})
+      
+      # Equity total em tempo real
+      - record: maveretta:realtime_equity_usd
+        expr: sum(bot_slot_allocation_usd{status="active"})
+      
+      # Slots ativos em tempo real
+      - record: maveretta:realtime_active_slots
+        expr: count(bot_slot_status == 1)
+      
+      # Drawdown atual
+      - record: maveretta:realtime_drawdown_pct
+        expr: (max_over_time(maveretta:realtime_equity_usd[1h]) - maveretta:realtime_equity_usd) / max_over_time(maveretta:realtime_equity_usd[1h]) * 100
+
+  # ===== TURBINADA: Agregações de Consenso (10s) =====
+  - name: maveretta_consensus_aggregated
+    interval: 10s
+    rules:
+      # Taxa de aprovação de consenso (1min)
+      - record: maveretta:consensus_approval_rate_1m
+        expr: rate(consensus_approved_total[1m]) / rate(consensus_rounds_total[1m])
+      
+      # Taxa de aprovação de consenso (5min)
+      - record: maveretta:consensus_approval_rate_5m
+        expr: rate(consensus_approved_total[5m]) / rate(consensus_rounds_total[5m])
+      
+      # Confiança média de consenso
+      - record: maveretta:consensus_avg_confidence
+        expr: avg(consensus_confidence)
+      
+      # Bloqueios por risco (rate 5min)
+      - record: maveretta:risk_blocks_rate_5m
+        expr: sum(rate(consensus_risk_blocked_total[5m])) * 60
+
+  # ===== TURBINADA: Métricas de Latência Agregadas (10s) =====
+  - name: maveretta_latency_aggregated
+    interval: 10s
+    rules:
+      # Latência p50 de decisões (1min)
+      - record: maveretta:decision_latency_p50_1m
+        expr: histogram_quantile(0.50, rate(agent_decision_latency_ms_bucket[1m]))
+      
+      # Latência p95 de decisões (1min)
+      - record: maveretta:decision_latency_p95_1m
+        expr: histogram_quantile(0.95, rate(agent_decision_latency_ms_bucket[1m]))
+      
+      # Latência p99 de decisões (1min)
+      - record: maveretta:decision_latency_p99_1m
+        expr: histogram_quantile(0.99, rate(agent_decision_latency_ms_bucket[1m]))
+      
+      # Latência média de exchanges (5min)
+      - record: maveretta:exchange_latency_avg_5m
+        expr: avg(rate(exchange_api_latency_ms_sum[5m]) / rate(exchange_api_latency_ms_count[5m]))
+
+  # ===== TURBINADA: Health & Uptime Agregado (15s) =====
+  - name: maveretta_health_aggregated
+    interval: 15s
+    rules:
+      # Uptime de todos os serviços (%)
+      - record: maveretta:services_uptime_pct
+        expr: avg(up{job=~"ai-gateway|bot-ai-multiagent|core-daemon"}) * 100
+      
+      # Uptime de exchanges (%)
+      - record: maveretta:exchanges_uptime_pct
+        expr: avg(exchange_connection_status) * 100
+      
+      # Taxa de erro HTTP (5min)
+      - record: maveretta:http_error_rate_5m
+        expr: sum(rate(http_requests_total{status=~"5.."}[5m]))
+      
+      # Taxa de erro de API de exchanges (5min)
+      - record: maveretta:exchange_error_rate_5m
+        expr: sum(rate(exchange_api_errors_total[5m]))
+
+  # ===== TURBINADA: Trading Activity Agregado (15s) =====
+  - name: maveretta_trading_aggregated
+    interval: 15s
+    rules:
+      # Trades por minuto (global)
+      - record: maveretta:trades_per_minute_global
+        expr: sum(rate(bot_slot_trades_total[1m])) * 60
+      
+      # Trades por exchange (5min)
+      - record: maveretta:trades_per_minute_by_exchange
+        expr: sum by (exchange) (rate(bot_slot_trades_total[5m])) * 60
+      
+      # Win rate global
+      - record: maveretta:global_win_rate
+        expr: avg(bot_slot_win_rate{status="active"})
+      
+      # Volume total negociado (5min)
+      - record: maveretta:total_volume_usd_5m
+        expr: sum(rate(bot_slot_volume_usd_total[5m])) * 300
+
+  # ===== TURBINADA: Arbitragem Agregada (15s) =====
+  - name: maveretta_arbitrage_aggregated
+    interval: 15s
+    rules:
+      # Taxa de sucesso de arbitragem
+      - record: maveretta:arbitrage_success_rate
+        expr: sum(rate(arbitrage_legs_total{status="completed"}[5m])) / sum(rate(arbitrage_legs_total[5m]))
+      
+      # PnL de arbitragem (5min)
+      - record: maveretta:arbitrage_pnl_5m
+        expr: sum(rate(arbitrage_pnl_usd_total[5m])) * 300
+      
+      # Tempo médio de execução de arbitragem
+      - record: maveretta:arbitrage_execution_time_avg
+        expr: avg(arbitrage_execution_time_ms)
+
+  # ===== TURBINADA: IA Agents Agregado (10s) =====
+  - name: maveretta_ia_agents_aggregated
+    interval: 10s
+    rules:
+      # Decisões de IA por minuto
+      - record: maveretta:ia_decisions_per_minute
+        expr: sum(rate(ia_agent_decisions_total[1m])) * 60
+      
+      # Confiança média por agente
+      - record: maveretta:ia_confidence_by_agent
+        expr: avg by (agent_id) (ia_agent_confidence)
+      
+      # Latência média de IA
+      - record: maveretta:ia_latency_avg_ms
+        expr: avg(rate(ia_agent_decision_latency_ms_sum[5m]) / rate(ia_agent_decision_latency_ms_count[5m]))
+      
+      # Taxa de erro de IA
+      - record: maveretta:ia_error_rate_5m
+        expr: sum(rate(ia_agent_errors_total[5m]))
+
+  # ===== TURBINADA: Resource Usage Agregado (30s) =====
+  - name: maveretta_resources_aggregated
+    interval: 30s
+    rules:
+      # CPU total usado pelos containers (%)
+      - record: maveretta:total_cpu_usage_pct
+        expr: sum(rate(container_cpu_usage_seconds_total{name=~"maveretta.*"}[1m])) * 100
+      
+      # Memória total usada pelos containers (GB)
+      - record: maveretta:total_memory_usage_gb
+        expr: sum(container_memory_usage_bytes{name=~"maveretta.*"}) / 1024 / 1024 / 1024
+      
+      # Network I/O total (MB/s)
+      - record: maveretta:total_network_io_mbps
+        expr: (sum(rate(container_network_receive_bytes_total{name=~"maveretta.*"}[1m])) + sum(rate(container_network_transmit_bytes_total{name=~"maveretta.*"}[1m]))) / 1024 / 1024
+      
+      # Disk I/O total (MB/s)
+      - record: maveretta:total_disk_io_mbps
+        expr: (sum(rate(container_fs_reads_bytes_total{name=~"maveretta.*"}[1m])) + sum(rate(container_fs_writes_bytes_total{name=~"maveretta.*"}[1m]))) / 1024 / 1024

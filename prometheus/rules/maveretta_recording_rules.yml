@@ -1,0 +1,12 @@
+groups:
+  - name: maveretta_recording
+    interval: 15s
+    rules:
+      - record: maveretta:equity_brl
+        expr: sum without() (binance_equity_brl)
+      - record: maveretta:equity_usdt
+        expr: sum without() (binance_equity_usdt)
+      - record: maveretta:ws_msgs_per_min
+        expr: rate(binance_websocket_messages_total[1m]) * 60
+      - record: maveretta:best_ask_top10_usdt
+        expr: topk(10, binance_best_ask{symbol=~".*USDT"})

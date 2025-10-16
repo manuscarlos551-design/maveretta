@@ -1,0 +1,70 @@
+services:
+  ai-gateway:
+    mem_limit: 512m
+    cpus: "0.80"
+    environment:
+      - LOG_LEVEL=info
+
+  dashboard:
+    mem_limit: 512m
+    cpus: "0.80"
+
+  nginx:
+    mem_limit: 256m
+    cpus: "0.50"
+
+  grafana:
+    mem_limit: 512m
+    cpus: "0.80"
+
+  prometheus:
+    mem_limit: 768m
+    cpus: "0.80"
+
+  alertmanager:
+    mem_limit: 256m
+    cpus: "0.50"
+
+  blackbox-exporter:
+    mem_limit: 128m
+    cpus: "0.20"
+
+  redis:
+    mem_limit: 256m
+    cpus: "0.30"
+
+  redis-exporter:
+    mem_limit: 128m
+    cpus: "0.20"
+
+  mongodb:
+    mem_limit: 1g
+    cpus: "1.00"
+
+  mongodb-exporter:
+    mem_limit: 128m
+    cpus: "0.20"
+
+  binance-exporter:
+    mem_limit: 256m
+    cpus: "0.30"
+
+  kucoin-exporter:
+    mem_limit: 256m
+    cpus: "0.30"
+
+  bybit-exporter:
+    mem_limit: 256m
+    cpus: "0.30"
+
+  coinbase-exporter:
+    mem_limit: 256m
+    cpus: "0.30"
+
+  okx-exporter:
+    mem_limit: 256m
+    cpus: "0.30"
+
+  bot-ai-multiagent:
+    mem_limit: 512m
+    cpus: "0.70"

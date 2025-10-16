@@ -1,0 +1,129 @@
+# Maveretta - Advanced Recording Rules
+# Regras de agregação para queries complexas e pesadas
+
+groups:
+  - name: maveretta_core_latency
+    interval: 10s
+    rules:
+      # Core decision latency percentiles
+      - record: maveretta:core_latency_p50
+        expr: histogram_quantile(0.50, rate(agent_decision_latency_ms_bucket[1m]))
+      
+      - record: maveretta:core_latency_p95
+        expr: histogram_quantile(0.95, rate(agent_decision_latency_ms_bucket[1m]))
+      
+      - record: maveretta:core_latency_p99
+        expr: histogram_quantile(0.99, rate(agent_decision_latency_ms_bucket[1m]))
+
+  - name: maveretta_slot_aggregations
+    interval: 15s
+    rules:
+      # Total PnL across all slots
+      - record: maveretta:total_pnl_usd
+        expr: sum(bot_slot_pnl_usd)
+      
+      # PnL by exchange
+      - record: maveretta:pnl_by_exchange
+        expr: sum by (exchange) (bot_slot_pnl_usd)
+      
+      # PnL by strategy
+      - record: maveretta:pnl_by_strategy
+        expr: sum by (strategy) (bot_slot_pnl_usd)
+      
+      # Active slots count
+      - record: maveretta:active_slots_total
+        expr: count(bot_slot_status == 1)
+      
+      # Total equity in all slots
+      - record: maveretta:total_equity_usd
+        expr: sum(bot_slot_allocation_usd)
+
+  - name: maveretta_cascade_metrics
+    interval: 15s
+    rules:
+      # Cascade transfer rate (transfers per minute)
+      - record: maveretta:cascade_transfer_rate_1m
+        expr: rate(bot_cascade_transfers_total[1m]) * 60
+      
+      # Cascade transfer rate (transfers per 5 minutes)
+      - record: maveretta:cascade_transfer_rate_5m
+        expr: rate(bot_cascade_transfers_total[5m]) * 60
+      
+      # Average cascade transfer amount (last 5 minutes)
+      - record: maveretta:cascade_avg_amount_5m
+        expr: rate(bot_cascade_transfer_amount_usd_sum[5m]) / rate(bot_cascade_transfer_amount_usd_count[5m])
+
+  - name: maveretta_ia_decisions
+    interval: 10s
+    rules:
+      # IA decision rate (decisions per minute)
+      - record: maveretta:ia_decision_rate_1m
+        expr: rate(ia_agent_decisions_total[1m]) * 60
+      
+      # IA decision rate (decisions per 5 minutes)
+      - record: maveretta:ia_decision_rate_5m
+        expr: rate(ia_agent_decisions_total[5m]) * 60
+      
+      # Average IA confidence
+      - record: maveretta:ia_avg_confidence
+        expr: avg(ia_agent_confidence)
+      
+      # IA decision latency p95
+      - record: maveretta:ia_latency_p95
+        expr: histogram_quantile(0.95, rate(ia_agent_decision_latency_seconds_bucket[5m]))
+
+  - name: maveretta_exchange_health
+    interval: 15s
+    rules:
+      # Exchange API error rate (errors per second)
+      - record: maveretta:exchange_error_rate_5m
+        expr: rate(binance_api_calls_total{status=~"error|timeout"}[5m])
+      
+      # Exchange connection uptime
+      - record: maveretta:exchange_uptime_pct
+        expr: avg_over_time(binance_connection_status[5m]) * 100
+      
+      # WebSocket message rate
+      - record: maveretta:ws_msg_rate_1m
+        expr: rate(binance_websocket_messages_total[1m]) * 60
+
+  - name: maveretta_ui_metrics
+    interval: 15s
+    rules:
+      # UI request rate
+      - record: maveretta:ui_request_rate_1m
+        expr: rate(http_requests_total{job="ai-gateway"}[1m]) * 60
+      
+      # UI error rate
+      - record: maveretta:ui_error_rate_5m
+        expr: rate(http_requests_total{job="ai-gateway",status=~"5.."}[5m])
+      
+      # UI latency p95
+      - record: maveretta:ui_latency_p95
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="ai-gateway"}[5m]))
+
+  - name: maveretta_trading_activity
+    interval: 15s
+    rules:
+      # Total trades per minute
+      - record: maveretta:trades_per_minute
+        expr: sum(rate(bot_slot_trades_total[1m])) * 60
+      
+      # Trades per exchange
+      - record: maveretta:trades_by_exchange
+        expr: sum by (exchange) (rate(bot_slot_trades_total[5m])) * 60
+      
+      # Win rate across all slots
+      - record: maveretta:global_win_rate
+        expr: avg(bot_slot_win_rate)
+
+  - name: maveretta_market_exposure
+    interval: 15s
+    rules:
+      # Total market exposure (sum of all positions)
+      - record: maveretta:total_market_exposure_usd
+        expr: sum(bot_slot_allocation_usd * bot_slot_status)
+      
+      # Exposure by exchange
+      - record: maveretta:exposure_by_exchange
+        expr: sum by (exchange) (bot_slot_allocation_usd * bot_slot_status)

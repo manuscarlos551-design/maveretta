@@ -1,0 +1,79 @@
+# Maveretta - Observability Extensions
+# Adiciona node-exporter, cAdvisor e melhorias no Prometheus
+# Use: docker-compose -f docker-compose.yml -f docker-compose-observability.yml up -d
+
+version: '3.8'
+
+services:
+  # ===== NODE EXPORTER (Host Metrics) =====
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: maveretta-node-exporter
+    restart: unless-stopped
+    command:
+      - '--path.rootfs=/host'
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - '/:/host:ro,rslave'
+    expose:
+      - "9100"
+    ports:
+      - "9100:9100"
+    networks:
+      - bot-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9100/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ===== cADVISOR (Container Metrics) =====
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: maveretta-cadvisor
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    expose:
+      - "8080"
+    ports:
+      - "8181:8080"
+    networks:
+      - bot-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ===== PROMETHEUS (Enhanced Configuration) =====
+  prometheus:
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=50GB
+      - --web.enable-admin-api
+    volumes:
+      - ./prometheus/prometheus_enhanced.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - ./prometheus/alerts:/etc/prometheus/alerts:ro
+      - prometheus-data:/prometheus
+      - ./logs/prometheus:/var/log/prometheus
+
+networks:
+  bot-network:
+    external: true

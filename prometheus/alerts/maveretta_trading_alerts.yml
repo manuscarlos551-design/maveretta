@@ -1,0 +1,205 @@
+# Maveretta - Trading & Execution Alerts
+# Alertas específicos para operações de trading e execução
+
+groups:
+  - name: maveretta_trading_alerts
+    interval: 30s
+    rules:
+      # ===== SLOT ALERTS =====
+      
+      - alert: SlotInactive
+        expr: |
+          (time() - bot_slot_last_activity_timestamp > 900)
+          and (bot_slot_status == 1)
+        for: 2m
+        labels:
+          severity: warning
+          component: trading
+        annotations:
+          summary: "Slot {{ $labels.slot_id }} has been inactive"
+          description: "Slot {{ $labels.slot_id }} on {{ $labels.exchange }} has not executed any trades for more than 15 minutes"
+          impact: "Potential missed trading opportunities"
+          action: "Check slot configuration and market conditions"
+      
+      - alert: SlotHighDrawdown
+        expr: bot_slot_drawdown_pct < -20
+        for: 1m
+        labels:
+          severity: critical
+          component: trading
+        annotations:
+          summary: "High drawdown on slot {{ $labels.slot_id }}"
+          description: "Slot {{ $labels.slot_id }} drawdown is {{ $value }}% (threshold: -20%)"
+          impact: "Significant capital loss risk"
+          action: "Consider pausing slot or adjusting risk parameters"
+      
+      - alert: SlotLowWinRate
+        expr: |
+          (bot_slot_win_rate < 0.3)
+          and (bot_slot_trades_total > 20)
+        for: 10m
+        labels:
+          severity: warning
+          component: trading
+        annotations:
+          summary: "Low win rate on slot {{ $labels.slot_id }}"
+          description: "Slot {{ $labels.slot_id }} win rate is {{ $value | humanizePercentage }} (threshold: 30%)"
+          impact: "Strategy may be underperforming"
+          action: "Review strategy parameters and market conditions"
+      
+      # ===== CORE LATENCY ALERTS =====
+      
+      - alert: CoreLatencyHigh
+        expr: maveretta:core_latency_p95 > 250
+        for: 3m
+        labels:
+          severity: warning
+          component: core
+        annotations:
+          summary: "High core decision latency"
+          description: "Core p95 latency is {{ $value }}ms (threshold: 250ms)"
+          impact: "Slow decision making may cause missed opportunities"
+          action: "Check core service performance and resource usage"
+      
+      - alert: CoreLatencyCritical
+        expr: maveretta:core_latency_p95 > 500
+        for: 1m
+        labels:
+          severity: critical
+          component: core
+        annotations:
+          summary: "Critical core decision latency"
+          description: "Core p95 latency is {{ $value }}ms (threshold: 500ms)"
+          impact: "Severe performance degradation"
+          action: "Immediate investigation required - check logs and resource usage"
+      
+      # ===== IA AGENT ALERTS =====
+      
+      - alert: IAAgentDown
+        expr: ia_agent_status == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: ia
+        annotations:
+          summary: "IA Agent {{ $labels.agent_name }} is offline"
+          description: "Agent {{ $labels.agent_name }} ({{ $labels.agent_id }}) has been offline for more than 2 minutes"
+          impact: "Trading decisions may be affected"
+          action: "Restart agent service and check logs"
+      
+      - alert: IALowConfidence
+        expr: ia_agent_confidence < 0.4
+        for: 10m
+        labels:
+          severity: warning
+          component: ia
+        annotations:
+          summary: "Low confidence from IA Agent {{ $labels.agent_name }}"
+          description: "Agent {{ $labels.agent_name }} confidence is {{ $value | humanizePercentage }} (threshold: 40%)"
+          impact: "Uncertain trading signals"
+          action: "Review market conditions and agent parameters"
+      
+      - alert: IAHighErrorRate
+        expr: rate(ia_agent_errors_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          component: ia
+        annotations:
+          summary: "High error rate from IA Agent {{ $labels.agent_name }}"
+          description: "Agent {{ $labels.agent_name }} error rate is {{ $value | humanize }} errors/sec"
+          impact: "Agent may not be functioning correctly"
+          action: "Check agent logs and API connectivity"
+      
+      # ===== CASCADE ALERTS =====
+      
+      - alert: CascadeStalled
+        expr: rate(bot_cascade_transfers_total[1h]) == 0
+        for: 15m
+        labels:
+          severity: warning
+          component: cascade
+        annotations:
+          summary: "Cascade system has stalled"
+          description: "No cascade transfers have occurred in the last hour"
+          impact: "Capital is not flowing between slots"
+          action: "Check cascade orchestrator and slot conditions"
+      
+      - alert: CascadeHighFrequency
+        expr: rate(bot_cascade_transfers_total[5m]) * 60 > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: cascade
+        annotations:
+          summary: "High frequency cascade transfers"
+          description: "Cascade transfer rate is {{ $value }} transfers/min (threshold: 10/min)"
+          impact: "Possible instability or over-aggressive capital reallocation"
+          action: "Review cascade triggers and thresholds"
+      
+      # ===== EXCHANGE ALERTS =====
+      
+      - alert: ExchangeAPIErrorHigh
+        expr: maveretta:exchange_error_rate_5m > 0.01
+        for: 3m
+        labels:
+          severity: critical
+          component: exchange
+        annotations:
+          summary: "High exchange API error rate"
+          description: "Exchange API error rate is {{ $value | humanizePercentage }} (threshold: 1%)"
+          impact: "Trading operations may be failing"
+          action: "Check exchange status and API credentials"
+      
+      - alert: ExchangeConnectionUnstable
+        expr: maveretta:exchange_uptime_pct < 95
+        for: 5m
+        labels:
+          severity: warning
+          component: exchange
+        annotations:
+          summary: "Exchange connection is unstable"
+          description: "Exchange uptime is {{ $value }}% over last 5 minutes (threshold: 95%)"
+          impact: "Intermittent trading disruptions"
+          action: "Check network connectivity and exchange status"
+      
+      - alert: ExchangeLatencyHigh
+        expr: binance_latency_seconds > 2
+        for: 5m
+        labels:
+          severity: warning
+          component: exchange
+        annotations:
+          summary: "High exchange latency for {{ $labels.symbol }}"
+          description: "Exchange latency is {{ $value }}s (threshold: 2s)"
+          impact: "Delayed market data and order execution"
+          action: "Check network and exchange health"
+      
+      # ===== CONSENSUS ALERTS =====
+      
+      - alert: ConsensusLowApprovalRate
+        expr: |
+          rate(agent_consensus_approved_total[10m]) / rate(agent_consensus_rounds_total[10m]) < 0.3
+        for: 5m
+        labels:
+          severity: warning
+          component: consensus
+        annotations:
+          summary: "Low consensus approval rate"
+          description: "Consensus approval rate is {{ $value | humanizePercentage }} (threshold: 30%)"
+          impact: "Most trading decisions are being rejected"
+          action: "Review agent agreement levels and market conditions"
+      
+      # ===== RISK ALERTS =====
+      
+      - alert: RiskBlocksHigh
+        expr: rate(agent_risk_blocked_total[5m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: risk
+        annotations:
+          summary: "High frequency of risk blocks"
+          description: "Risk management is blocking {{ $value }} decisions/sec"
+          impact: "Many trading opportunities being rejected"
+          action: "Review risk parameters - may be too conservative"

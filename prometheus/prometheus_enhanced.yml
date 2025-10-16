@@ -1,0 +1,137 @@
+# Prometheus Configuration - Maveretta Bot
+# VERSÃO EXPANDIDA - Observabilidade 360° com retenção e performance otimizada
+
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+  scrape_timeout: 8s
+  external_labels:
+    cluster: 'maveretta'
+    environment: 'production'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+# Rule files
+rule_files:
+  - '/etc/prometheus/alert_rules.yml'
+  - '/etc/prometheus/rules/*.yml'
+  - '/etc/prometheus/alerts/*.yml'
+
+scrape_configs:
+  # ===== CORE SERVICES (High-frequency scraping) =====
+  
+  # Backend API Gateway
+  - job_name: 'ai-gateway'
+    static_configs:
+      - targets: ['ai-gateway:8080']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+    scrape_timeout: 4s
+
+  # Bot AI Multi-Agent
+  - job_name: 'bot-ai-multiagent'
+    static_configs:
+      - targets: ['bot-ai-multiagent:9200']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+    scrape_timeout: 4s
+
+  # ===== EXCHANGE EXPORTERS (Critical market data) =====
+  
+  # Binance Exporter
+  - job_name: 'binance-exporter'
+    static_configs:
+      - targets: ['binance-exporter:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 3s
+    scrape_timeout: 2s
+
+  # KuCoin Exporter
+  - job_name: 'kucoin-exporter'
+    static_configs:
+      - targets: ['kucoin-exporter:8001']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+
+  # Bybit Exporter
+  - job_name: 'bybit-exporter'
+    static_configs:
+      - targets: ['bybit-exporter:8002']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+
+  # Coinbase Exporter
+  - job_name: 'coinbase-exporter'
+    static_configs:
+      - targets: ['coinbase-exporter:8003']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+
+  # OKX Exporter
+  - job_name: 'okx-exporter'
+    static_configs:
+      - targets: ['okx-exporter:8004']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+
+  # ===== DATABASE EXPORTERS =====
+  
+  # MongoDB Exporter
+  - job_name: 'mongodb-exporter'
+    static_configs:
+      - targets: ['mongodb-exporter:9216']
+    scrape_interval: 15s
+
+  # Redis Exporter
+  - job_name: 'redis-exporter'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    scrape_interval: 15s
+
+  # ===== INFRASTRUCTURE EXPORTERS =====
+  
+  # Node Exporter (Host metrics)
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 10s
+
+  # cAdvisor (Container metrics)
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # Blackbox Exporter (Endpoint probing)
+  - job_name: 'blackbox-exporter'
+    static_configs:
+      - targets: ['blackbox-exporter:9115']
+    scrape_interval: 30s
+
+  # Grafana metrics
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['grafana:3000']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  # ===== UI DASHBOARD =====
+  
+  # Streamlit Dashboard (if instrumented)
+  - job_name: 'streamlit-dashboard'
+    static_configs:
+      - targets: ['dashboard:8501']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # ===== PROMETHEUS SELF-MONITORING =====
+  
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 5s

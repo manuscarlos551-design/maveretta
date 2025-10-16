@@ -1,0 +1,125 @@
+﻿groups:
+- name: maveretta_critical_alerts
+  rules:
+  
+  # ===== SERVICE AVAILABILITY =====
+  - alert: ServiceDown
+    expr: up{job=~".*"} == 0
+    for: 1m
+    labels:
+      severity: critical
+      service: "{{ \.job }}"
+    annotations:
+      summary: "Service {{ \.job }} is DOWN"
+      description: "The service {{ \.job }} has been down for more than 1 minute."
+      impact: "Trading operations may be affected"
+      action: "Check container logs and restart if necessary"
+
+  - alert: HighErrorRate
+    expr: rate(ai_gateway_requests_total{status=~"5.."}[5m]) > 0.1
+    for: 2m
+    labels:
+      severity: critical
+      service: ai-gateway
+    annotations:
+      summary: "High error rate on AI Gateway"
+      description: "Error rate is above 10% for more than 2 minutes"
+      impact: "API requests failing"
+      action: "Check AI Gateway logs and backend services"
+
+  # ===== DATABASE ALERTS =====
+  - alert: MongoDBDown
+    expr: mongodb_up == 0
+    for: 30s
+    labels:
+      severity: critical
+      service: mongodb
+    annotations:
+      summary: "MongoDB is DOWN"
+      description: "MongoDB database is not responding"
+      impact: "All trading data and logs unavailable"
+      action: "Check MongoDB container and storage"
+
+  - alert: RedisDown
+    expr: redis_up == 0
+    for: 30s
+    labels:
+      severity: critical
+      service: redis
+    annotations:
+      summary: "Redis is DOWN"
+      description: "Redis cache is not responding"
+      impact: "Performance degradation, cache unavailable"
+      action: "Check Redis container and memory"
+
+  # ===== PERFORMANCE ALERTS =====
+  - alert: HighResponseTime
+    expr: histogram_quantile(0.95, rate(ai_gateway_request_duration_seconds_bucket[5m])) > 5
+    for: 3m
+    labels:
+      severity: warning
+      service: ai-gateway
+    annotations:
+      summary: "High response time on AI Gateway"
+      description: "95th percentile response time above 5 seconds"
+      impact: "Slow user interface and API responses"
+      action: "Check backend services and database performance"
+
+  - alert: HighMemoryUsage
+    expr: container_memory_usage_bytes{container=~".*"} / container_spec_memory_limit_bytes > 0.8
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High memory usage on container {{ \.container }}"
+      description: "Memory usage above 80% for more than 2 minutes"
+      impact: "Container may be killed due to OOM"
+      action: "Check for memory leaks or increase resource limits"
+
+  # ===== TRADING ALERTS =====
+  - alert: NoTradingActivity
+    expr: increase(trading_decisions_total[1h]) == 0
+    for: 10m
+    labels:
+      severity: warning
+      service: trading
+    annotations:
+      summary: "No trading activity detected"
+      description: "No trading decisions made in the last hour"
+      impact: "Trading bots may be stuck or market conditions unfavorable"
+      action: "Check AI agents and market data feeds"
+
+  - alert: ExchangeConnectionLost
+    expr: binance_connection_status == 0
+    for: 1m
+    labels:
+      severity: critical
+      service: binance
+    annotations:
+      summary: "Exchange connection lost"
+      description: "Connection to Binance exchange has been lost"
+      impact: "Trading operations stopped, no market data"
+      action: "Check network connectivity and exchange status"
+
+  # ===== INFRASTRUCTURE ALERTS =====
+  - alert: DiskSpaceLow
+    expr: (1 - (node_filesystem_avail_bytes{fstype=~"ext4|xfs"} / node_filesystem_size_bytes)) * 100 > 85
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Disk space running low on {{ \.instance }}"
+      description: "Disk usage above 85% on {{ \.mountpoint }}"
+      impact: "System may become unstable if disk fills"
+      action: "Clean up logs or increase disk space"
+
+  - alert: HighCPULoad
+    expr: rate(container_cpu_usage_seconds_total[5m]) * 100 > 80
+    for: 3m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High CPU load on container {{ \.container }}"
+      description: "CPU usage above 80% for more than 3 minutes"
+      impact: "Performance degradation, slow responses"
+      action: "Check for CPU-intensive processes or scale resources"

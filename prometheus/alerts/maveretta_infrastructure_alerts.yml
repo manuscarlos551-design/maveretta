@@ -1,0 +1,219 @@
+# Maveretta - Infrastructure & System Alerts
+# Alertas para recursos de sistema, containers e serviços
+
+groups:
+  - name: maveretta_infrastructure_alerts
+    interval: 30s
+    rules:
+      # ===== NODE/HOST ALERTS =====
+      
+      - alert: HostHighCPU
+        expr: |
+          100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "High CPU usage on host {{ $labels.instance }}"
+          description: "CPU usage is {{ $value | humanize }}% (threshold: 80%)"
+          impact: "System performance degradation"
+          action: "Identify CPU-intensive processes or scale resources"
+      
+      - alert: HostHighMemory
+        expr: |
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "High memory usage on host {{ $labels.instance }}"
+          description: "Memory usage is {{ $value | humanize }}% (threshold: 85%)"
+          impact: "Risk of OOM kills"
+          action: "Check memory leaks or increase available memory"
+      
+      - alert: HostDiskSpaceLow
+        expr: |
+          (1 - (node_filesystem_avail_bytes{fstype=~"ext4|xfs"} / node_filesystem_size_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }}:{{ $labels.mountpoint }}"
+          description: "Disk usage is {{ $value | humanize }}% (threshold: 85%)"
+          impact: "System may become unstable"
+          action: "Clean up logs or expand disk space"
+      
+      - alert: HostDiskIOHigh
+        expr: |
+          rate(node_disk_io_time_seconds_total[5m]) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "High disk I/O on {{ $labels.instance }}"
+          description: "Disk I/O utilization is {{ $value | humanizePercentage }}"
+          impact: "Slow disk performance"
+          action: "Check I/O-intensive processes or upgrade storage"
+      
+      # ===== CONTAINER ALERTS =====
+      
+      - alert: ContainerHighCPU
+        expr: |
+          sum by (name, container_label_com_docker_compose_service) (rate(container_cpu_usage_seconds_total{name!=""}[5m])) * 100 > 80
+        for: 3m
+        labels:
+          severity: warning
+          component: container
+        annotations:
+          summary: "High CPU usage in container {{ $labels.name }}"
+          description: "Container CPU usage is {{ $value | humanize }}% (threshold: 80%)"
+          impact: "Container performance degradation"
+          action: "Check container logs and consider resource limits adjustment"
+      
+      - alert: ContainerHighMemory
+        expr: |
+          (container_memory_usage_bytes{name!=""} / container_spec_memory_limit_bytes) * 100 > 85
+        for: 3m
+        labels:
+          severity: warning
+          component: container
+        annotations:
+          summary: "High memory usage in container {{ $labels.name }}"
+          description: "Container memory usage is {{ $value | humanize }}% (threshold: 85%)"
+          impact: "Container may be killed by OOM"
+          action: "Check for memory leaks or increase memory limits"
+      
+      - alert: ContainerRestarting
+        expr: |
+          rate(container_last_seen{name!=""}[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: container
+        annotations:
+          summary: "Container {{ $labels.name }} is restarting frequently"
+          description: "Container has restarted {{ $value }} times in last 5 minutes"
+          impact: "Service instability"
+          action: "Check container logs for crash reasons"
+      
+      # ===== NETWORK ALERTS =====
+      
+      - alert: HostNetworkHighTraffic
+        expr: |
+          rate(node_network_receive_bytes_total{device!~"lo|veth.*"}[5m]) > 100000000
+        for: 5m
+        labels:
+          severity: info
+          component: network
+        annotations:
+          summary: "High network traffic on {{ $labels.instance }}:{{ $labels.device }}"
+          description: "Network receive rate is {{ $value | humanize }}B/s"
+          impact: "High bandwidth usage"
+          action: "Monitor for DDoS or investigate traffic source"
+      
+      - alert: HostNetworkErrors
+        expr: |
+          rate(node_network_receive_errs_total[5m]) + rate(node_network_transmit_errs_total[5m]) > 0.01
+        for: 2m
+        labels:
+          severity: warning
+          component: network
+        annotations:
+          summary: "Network errors on {{ $labels.instance }}:{{ $labels.device }}"
+          description: "Network error rate is {{ $value }} errors/sec"
+          impact: "Potential connectivity issues"
+          action: "Check network hardware and configuration"
+      
+      # ===== DATABASE ALERTS =====
+      
+      - alert: MongoDBHighConnections
+        expr: mongodb_connections{state="current"} > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "MongoDB has high number of connections"
+          description: "Current connections: {{ $value }} (threshold: 100)"
+          impact: "May hit connection limits"
+          action: "Check for connection leaks or increase connection pool"
+      
+      - alert: MongoDBSlowQueries
+        expr: rate(mongodb_mongod_op_latencies_latency_total[5m]) / rate(mongodb_mongod_op_latencies_ops_total[5m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "MongoDB slow queries detected"
+          description: "Average query latency is {{ $value }}ms"
+          impact: "Database performance degradation"
+          action: "Review slow queries and add indexes"
+      
+      - alert: RedisHighMemory
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Redis high memory usage"
+          description: "Redis memory usage is {{ $value | humanizePercentage }}"
+          impact: "Risk of evictions"
+          action: "Check memory policy or increase available memory"
+      
+      # ===== UI ALERTS =====
+      
+      - alert: UILatencyHigh
+        expr: maveretta:ui_latency_p95 > 0.3
+        for: 5m
+        labels:
+          severity: warning
+          component: ui
+        annotations:
+          summary: "High UI response latency"
+          description: "UI p95 latency is {{ $value }}s (threshold: 300ms)"
+          impact: "Slow user experience"
+          action: "Check backend services and database performance"
+      
+      - alert: UIHighErrorRate
+        expr: maveretta:ui_error_rate_5m > 0.05
+        for: 3m
+        labels:
+          severity: critical
+          component: ui
+        annotations:
+          summary: "High UI error rate"
+          description: "UI error rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+          impact: "Users experiencing errors"
+          action: "Check application logs and backend services"
+      
+      # ===== PROMETHEUS ALERTS =====
+      
+      - alert: PrometheusTSDBCompactionsFailing
+        expr: rate(prometheus_tsdb_compactions_failed_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: monitoring
+        annotations:
+          summary: "Prometheus TSDB compactions failing"
+          description: "Compaction failure rate: {{ $value }}"
+          impact: "Storage issues may occur"
+          action: "Check Prometheus logs and disk space"
+      
+      - alert: PrometheusTargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: monitoring
+        annotations:
+          summary: "Prometheus target {{ $labels.job }} is down"
+          description: "Target {{ $labels.instance }} has been down for more than 2 minutes"
+          impact: "Missing metrics data"
+          action: "Check target service health"

@@ -1,0 +1,173 @@
+# Prometheus Configuration - Maveretta Bot
+# VERSÃO OTIMIZADA - Coleta completa com scrape intervals por criticidade
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'maveretta'
+    environment: 'production'
+
+# Carregar recording rules e alerts
+rule_files:
+  - '/etc/prometheus/rules/*.yml'
+  - '/etc/prometheus/alerts/*.yml'
+
+scrape_configs:
+  # === HOT PATH: Mercado (3-5s) ===
+  
+  # Binance Exporter (hot path - trading crítico)
+  - job_name: 'binance-exporter'
+    static_configs:
+      - targets: ['binance-exporter:8000']
+        labels:
+          service: 'exchange'
+          exchange: 'binance'
+    metrics_path: '/metrics'
+    scrape_interval: 3s
+
+  # KuCoin Exporter
+  - job_name: 'kucoin-exporter'
+    static_configs:
+      - targets: ['kucoin-exporter:8001']
+        labels:
+          service: 'exchange'
+          exchange: 'kucoin'
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+
+  # Bybit Exporter
+  - job_name: 'bybit-exporter'
+    static_configs:
+      - targets: ['bybit-exporter:8002']
+        labels:
+          service: 'exchange'
+          exchange: 'bybit'
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+
+  # Coinbase Exporter
+  - job_name: 'coinbase-exporter'
+    static_configs:
+      - targets: ['coinbase-exporter:8003']
+        labels:
+          service: 'exchange'
+          exchange: 'coinbase'
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+
+  # OKX Exporter
+  - job_name: 'okx-exporter'
+    static_configs:
+      - targets: ['okx-exporter:8004']
+        labels:
+          service: 'exchange'
+          exchange: 'okx'
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+
+  # === CORE SERVICES: Trading (5-10s) ===
+  
+  # Backend API Gateway
+  - job_name: 'ai-gateway'
+    static_configs:
+      - targets: ['ai-gateway:8080']
+        labels:
+          service: 'core'
+          component: 'gateway'
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+
+  # Bot AI Multi-Agent (orquestração e decisões)
+  - job_name: 'bot-ai-multiagent'
+    static_configs:
+      - targets: ['bot-ai-multiagent:9200']
+        labels:
+          service: 'core'
+          component: 'orchestrator'
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+
+  # Core Daemon (continuous orchestration)
+  - job_name: 'core-daemon'
+    static_configs:
+      - targets: ['core-daemon:9109']
+        labels:
+          service: 'core'
+          component: 'daemon'
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+
+  # === INFRASTRUCTURE: Host e Containers (15s) ===
+  
+  # Node Exporter (métricas de host)
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          service: 'infrastructure'
+          component: 'host'
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  # cAdvisor (métricas de containers Docker)
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+        labels:
+          service: 'infrastructure'
+          component: 'containers'
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  # MongoDB Exporter
+  - job_name: 'mongodb-exporter'
+    static_configs:
+      - targets: ['mongodb-exporter:9216']
+        labels:
+          service: 'infrastructure'
+          component: 'database'
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  # Redis Exporter
+  - job_name: 'redis-exporter'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+        labels:
+          service: 'infrastructure'
+          component: 'cache'
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  # === MONITORING: Self-monitoring (30s) ===
+  
+  # Blackbox Exporter (probing)
+  - job_name: 'blackbox-exporter'
+    static_configs:
+      - targets: ['blackbox-exporter:9115']
+        labels:
+          service: 'monitoring'
+          component: 'prober'
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'monitoring'
+          component: 'prometheus'
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+
+  # Grafana self-monitoring
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['grafana:3000']
+        labels:
+          service: 'monitoring'
+          component: 'grafana'
+    metrics_path: '/metrics'
+    scrape_interval: 30s

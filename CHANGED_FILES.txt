@@ -1,0 +1,85 @@
+# ARQUIVOS MODIFICADOS - Maveretta Trading Bot
+## Data: 2025-10-16
+
+### 1. /app/ai_gateway/slot_context.py
+**Tipo**: CRIADO (copiado de ai-gateway-slot_context.py)
+**Mudança**: Movido para estrutura de módulo Python correto
+**Razão**: Corrigir imports absolutos em ai_gateway_main.py
+
+### 2. /app/docker/ai-gateway.Dockerfile
+**Tipo**: MODIFICADO
+**Mudanças**:
+- Linha 58: Corrigido COPY de `interfaces/api/ai_gateway/` para estrutura correta
+- Linha 58-59: Adicionados COPY de ai_gateway_main.py e ai_gateway/
+- Linha 66-67: Healthcheck ajustado (interval 5s, retries 20)
+- Linha 72: CMD alterado para `uvicorn ai_gateway_main:app` (antes: python -m ai_gateway)
+**Razão**: Corrigir build e startup do ai-gateway
+
+### 3. /app/docker-compose.yml
+**Tipo**: MODIFICADO
+**Mudanças**:
+- Linha 132-133: Credenciais Grafana alteradas
+  * Antes: admin/admin123
+  * Depois: Maverick/Xpd121157@
+**Razão**: Aplicar credenciais padrão conforme especificação
+
+### 4. /app/interfaces/web/app.py
+**Tipo**: MODIFICADO
+**Mudanças**:
+- Linhas 813-850: Aba 💰 Carteira finalizada
+  * Removido: "🚧 Seção em desenvolvimento"
+  * Adicionado: 7 painéis Grafana reais
+    - maveretta-overview-live panels 13, 14 (Carteira USDT/BRL)
+    - maveretta-bybit-live panel 1 (Bybit Equity)
+    - maveretta-coinbase-live panel 1 (Coinbase Equity)
+    - maveretta-okx-live panel 1 (OKX Equity)
+    - maveretta-kucoin-live panels 1, 3 (KuCoin Equity + Over Time)
+  * Layout: 3 seções com colunas responsivas
+  * Tamanhos: KPIs 280px, gráficos 400px
+**Razão**: Finalizar aba Carteira sem mocks, apenas dados reais
+
+### 5. /app/archive/deprecated/ (CRIADO)
+**Tipo**: NOVO DIRETÓRIO
+**Arquivos movidos**:
+- interfaces/web/app.py.backup → archive/deprecated/app.py.backup
+- bot_runner_modular.py → archive/deprecated/bot_runner_modular.py
+**Razão**: Limpeza segura de código deprecated
+
+---
+
+## Resumo Estatístico
+
+| Métrica | Valor |
+|---------|-------|
+| Arquivos criados | 2 |
+| Arquivos modificados | 3 |
+| Arquivos movidos (archive) | 2 |
+| Linhas adicionadas | ~80 |
+| Linhas removidas | ~20 |
+| Commits sugeridos | 1 (atomic: "feat: finalize wallet tab, fix ai-gateway, apply Maverick credentials") |
+
+---
+
+## Validações Realizadas
+
+✅ ai_gateway/slot_context.py existe e é importável
+✅ docker/ai-gateway.Dockerfile build testado
+✅ docker-compose.yml válido (yamllint)
+✅ interfaces/web/app.py sintaxe Python válida
+✅ Grafana embeds UIDs verificados contra GRAFANA_EMBEDS.json
+✅ Nenhum arquivo .env alterado
+✅ Árvore de diretórios preservada
+
+---
+
+## Próximos Passos (Smoke Tests)
+
+1. Build: `docker compose build --no-cache`
+2. Startup: `docker compose up -d`
+3. Health: `docker compose ps` (todos healthy após 2-3 min)
+4. UI: Acessar http://localhost/ → Aba 💰 Carteira
+5. Grafana: Acessar http://localhost/grafana/ → Login Maverick/Xpd121157@
+
+---
+
+**Observação**: Todos os arquivos listados estão prontos para commit/deploy.
